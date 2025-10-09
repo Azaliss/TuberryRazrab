@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --app-gradient: radial-gradient(circle at 10% 20%, rgba(142, 197, 252, 0.35), transparent 60%),
+    radial-gradient(circle at 90% 10%, rgba(196, 181, 253, 0.45), transparent 55%),
+    linear-gradient(145deg, #f5f8ff 0%, #f3f1ff 45%, #ffffff 100%);
+  --app-surface: rgba(255, 255, 255, 0.82);
+  --app-surface-strong: rgba(241, 244, 255, 0.88);
+  --app-border: rgba(183, 198, 231, 0.5);
+  --app-border-strong: rgba(125, 147, 196, 0.55);
+  --app-text-primary: #0f172a;
+  --app-text-muted: #4b5a7d;
+  --app-accent: #3b82f6;
+  --app-accent-soft: rgba(59, 130, 246, 0.12);
+  --app-success: #22c55e;
+  --app-danger: #ef4444;
+  --app-radius-lg: 24px;
+  --app-radius-md: 18px;
+  --app-blur: 20px;
+}
+
+body {
+  @apply min-h-screen bg-[#eef3ff] text-[var(--app-text-primary)] font-sans antialiased;
+  background-image: var(--app-gradient);
+}
+
+html {
+  @apply scroll-smooth;
+}
+
+a {
+  @apply text-[var(--app-accent)] transition-colors;
+}
+
+a:hover {
+  @apply text-blue-600;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
+    --border: 0 0% 89.8%;
+    --input: 0 0% 89.8%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --ring: 0 0% 3.9%;
+    --radius: 0.5rem;
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+  }
+  .dark {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 14.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 14.9%;
+    --input: 0 0% 14.9%;
+    --ring: 0 0% 83.1%;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-white/70 backdrop-blur-[var(--app-blur)] border border-[var(--app-border)] shadow-xl shadow-blue-100;
+  }
+
+  .gradient-stroke {
+    @apply border-transparent bg-gradient-to-br from-white/90 via-white/70 to-white/30 backdrop-blur-xl;
+  }
+}

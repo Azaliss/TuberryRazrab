@@ -1,0 +1,21 @@
+{
+  email admin@tuberry.ru
+  acme_ca https://acme-v02.api.letsencrypt.org/directory
+}
+
+tuberry.ru {
+  encode gzip
+
+  @apiPath path /api/*
+  handle @apiPath {
+    reverse_proxy backend:8000
+  }
+
+  handle {
+    reverse_proxy frontend:3000
+  }
+}
+
+www.tuberry.ru {
+  redir https://tuberry.ru{uri} permanent
+}

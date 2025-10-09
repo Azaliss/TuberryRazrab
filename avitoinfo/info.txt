@@ -1,0 +1,972 @@
+Общая информация
+API работает только с Авито Доставкой для бизнеса. Чтобы её включить, нужно указать реквизиты компании и настроить тариф. Подробнее
+В январе 2025 года прекращается поддержка передачи стоимости и сроков для доставки силами продавца (DBS, CDBS и RDBS). Необходимо перейти на один из существующих тарифов или создать собственный. Подробнее
+С помощью методов API из этого раздела вы можете управлять своими заказами, созданными на Авито:
+
+Получать список заказов;
+Переводить заказ в другой статус;
+Передавать стоимость и сроки для доставки силами продавца (DBS, CDBS и RDBS);
+Передавать трек-номер для доставки партнёрами продавца (DBS, CDBS);
+Передавать маркировки системы "Честный знак";
+Получать возможные сроки приезда курьера для отправки заказа (Courier);
+Выставить выбранный временной промежуток приезда курьера для отправки заказа (Courier);
+Выбрать отделение Почты, через которое будет принят возврат заказа на обратном потоке (Courier);
+Подготовить заказ, передавать сроки бронирования, адрес и сообщение покупателю (CNC).
+Для разных способов доставки могут быть доступны не все действия с заказом. Подробнее смотри способы доставки и получение заказов.
+
+Способы доставки
+Заказы в Авито может быть создан с разными типами доставки. Подробнее про разные способы доставки можно почитать в разделе помощи Авито. В API поддерживаются следующие типы:
+
+pvz - ПВЗ;
+dbs - Доставка партнёрами продавца (ПВЗ);
+cdbs - Доставка партнёрами продавца (курьер);
+rdbs - Доставка курьером продавца;
+courier - Доставка курьером Яндекса;
+cnc - Самовывоз.
+С точки зрения API, основное отличие состоит в доступных действиях с заказами:
+
+Действие/Способ доставки	pvz	dbs	сdbs	rdbs	courier	cnc
+Передача маркировок	✓	✓	✓	✓	✓	✓
+Подтверждение заказа	✓	✓	✓	✓		
+Отмена заказа	✓	✓	✓	✓	✓	✓
+Подтверждение отправки заказа				✓		
+Подтверждение доставки заказа				✓		✓
+Передача условий доставки		✓	✓	✓		
+Передача трек-номера		✓	✓			
+Получение доступных временных интервалов приезда курьера					✓	
+Выбор временного интервала приезда курьера					✓	
+Подтверждение возврата с выбором отделения Почты					✓	
+Подготовка заказа и уточнение деталей					✓	✓
+Получение заказов
+Для выгрузки части заказов можно указать следующие параметры запроса:
+
+ids - идентификаторы заказов
+statuses - массив требуемых статусов
+page - номер страницы для пагинации
+limit - количество заказов на странице
+dateFrom - дата, с которой надо выгрузить заказы
+При использовании в запросе параметра dateFrom, необходимо помнить о том, что заказы доступны для выгрузки только 6 месяцев после создания или 3 месяца после перехода в финальный (closed) статус.
+
+Можно получить заказы, в только в таких статусах:
+
+on_confirmation - ожидает подтверждения
+ready_to_ship - ждет отправки
+in_transit - в пути
+canceled - отменный заказ
+delivered - доставлен покупателю
+on_return - на возврате
+in_dispute - по заказу открыт спор
+closed - заказ закрыт
+В формате ответа ручки предусмотрены два поля для идентификаторов заказа: id и marketplaceId. Поле marketplaceId содержит значение идентификатора, который отображается на странице заказа, а id используется в ручках API заказов, при получении заказов в параметре ids запроса мы ожидаем эти идентификаторы.
+
+Более подробную информацию о статусе возврата можно получить из объекта returnPolicy, в нем поле returnStatus может принимать следующие значения:
+
+in_transit - возврат в пути;
+ready_to_pickup - возврат доставлен, его можно получить;
+self_return - возврат осуществляется продавцом самостоятельно (только для DBS и CDBS).
+Действия с заказами
+Доступные действия с заказом зависят от способа доставки и статуса заказа. Для упрощения работы с API в модели заказа приходит поле availableActions с массивом доступных действий. Каждое действие состоит из двух полей: name - название действия и required - флага, обозначающего, что действие необходимо для дальнейшего движения заказа.
+
+API поддерживает следующие действий.
+
+Действия перевода заказа в другой статус:
+
+confirm - подтверждение заказа;
+reject - отмена заказа;
+perform - подтверждение отправки заказа (RDBS);
+receive - подтверждение доставки заказа (RDBS, CNC).
+Действия передачи кодов маркировки:
+
+setMarkings - передача кодов маркировки системы "Честный знак".
+Действия передачи условий доставки:
+
+setDeliveryCost - передача стоимости доставки партнёрами продавца (DBS, CDBS).
+setDeliveryTerms - передача стоимости и сроков доставки курьером продавца (RDBS).
+Действия передачи трек-номера:
+
+setTrackNumber - передача трек-номера посылки для доставки партнёрами продавца (DBS, CDBS);
+fixTrackNumber - исправление трек-номера посылки, если он не прошёл проверку (DBS, CDBS).
+Действия подтверждения курьерского заказа с выбором времени приезда курьера:
+
+getCourierDeliveryRange - получение доступных временных интервалов приезда курьера (Courier);
+setCourierDeliveryRange - выбор/изменение времени приезда курьера (Courier).
+Действия подтверждение возврата с выбором отделения Почты:
+
+acceptReturnOrder - подтверждение возврата и выбор отделения Почты, куда придёт возврат (Courier)
+{
+  "availableActions": [
+    {
+      "name": "confirm",
+      "required": true
+    },
+    {
+      "name": "reject",
+      "required": false
+    },
+    {
+      "name": "setMarkings",
+      "required": false
+    }
+  ]
+}
+Пример поля availableActions для заказа у которого есть три доступных действия:
+confirm - подтвердить заказ, reject - отменить заказ и setMarkings - передать коды маркировок.
+В данном случае действие confirm обязательное действие для движения заказа. Без выполнения этого действия заказ отменится по таймауту.
+
+Действия подготовки заказа и уточнения деталей:
+
+setCNCDetails - подготовка заказа и передача сроков бронирования, адреса и комментария (CNC)
+Для большинства действий, которые обязательны для движения заказа, есть ограничение по времени на выполнение (таймаут). После превышения таймаута заказ автоматически отменится. Список ограничений по времени приходит в поле schedules в модели заказа.
+
+Обратите внимание, что поле schedules так же содержит таймауты для действий не связанных с API, например, отправки товара.
+
+Перевод заказа в другой статус
+Для перевода заказа в другой статус используется метод applyTransition.
+
+Метод позволяет подтвердить или отклонить заказ, а так же подтвердить отправку и доставку заказа. Для перевода нужно передать на вход методу идентификатор заказа и название перехода.
+
+Доступны следующие переходы для заказов:
+
+confirm для подтверждения;
+
+reject для отклонения;
+
+perform для подтверждение отправки заказа (RDBS);
+
+receive для подтверждение доставки заказа (RDBS, CNC).
+
+Передача маркировки "Честный знак"
+Для передачи маркировки системы "Честный знак" используется метод markings.
+
+При необходимости передачи маркировок это следует сделать до подтверждения заказа. Для каждой маркировки нужно указать идентификатор товара и заказа. Для того, чтобы отозвать маркировки, нужно вызвать эту ручку с пустым массивом маркировок.
+
+Передача условий доставки
+В январе 2025 года прекращается поддержка передачи стоимости и сроков для доставки силами продавца (DBS, CDBS и RDBS). Необходимо перейти на один из существующих тарифов или создать собственный. Подробнее
+Для передачи условий доставки используется метод setTerms.
+
+Передавать условия доставки требуется только для заказов DBS, CDBS и RDBS, которые созданы c тарифом «По запросу». Если в поле availableActions заказа приходит действие setDeliveryCost, то необходимо передать стоимость доставки. Если приходит действие setDeliveryTerms, то необходимо передать стоимость и срок доставки.
+
+Передача трек-номера
+Для передачи трек-номера используется метод setTrackingNumber.
+
+Трек-номер необходимо указывать для всех заказов DBS и CDBS. После передачи трек-номера его возможно изменить, если в поле availableActions заказа приходит действие setTrackNumber с флагом required=false.
+
+В случае, если трек-номер не прошёл проверку, в поле availableActions заказа придёт действие fixTrackNumber с флагом required=true. В этом случае необходимо передать исправленный трек-номер.
+
+Подтверждение возврата с выбором отделения Почты
+Для подтверждения возврата используется метод acceptReturnOrder.
+
+Подтверждение возврата необходимо выполнить, если покупатель открыл спор по заказу (заказ находится в статусе in_dispute).
+
+При выполнении этого действия необходимо указать номер отделения Почты, из которого надо будет забрать возврат, когда его доставят.
+
+Данное действие можно проигнорировать, тогда через 2 недели автоматически будет принята заявка на возврат, и будет выбрано ближайшее отделение Почты.
+
+Подтверждение курьерского заказа продавцом
+В отличие от других сценариев, в курьерских заказах для подтверждения продавцу надо выполнить 2 отдельных действия:
+
+Получение доступных временных интервалов приезда курьера;
+Выбор времени приезда курьера.
+Данные методы также можно использовать, чтобы изменить временной интервал приезда курьера до тех пор, пока курьер не был назначен на заказ.
+
+Получение доступных временных интервалов приезда курьера
+Для получения списка всех доступных интервалов приезда курьера используется метод getCourierDeliveryRange.
+
+Выбор времени приезда курьера
+Для выбора времени приезда курьера используется метод setCourierDeliveryRange.
+
+В тело запроса необходимо передать выбранный интервал, полученный после вызова getCourierDeliveryRange
+
+После вызова данного метода курьерская служба зарегистрирует заявку на курьера, а заказ будет подтверждён продавцом.
+
+Данный метод может быть использован и для изменения выбора даты и времени приезда курьера, например, если попросил покупатель.
+
+Подготовка заказа и уточнение деталей
+Для подготовки заказа и передачи сроков бронирования, адреса и комментария используется метод cncSetDetails.
+
+Данный метод используется только для заказов с самовывозом.
+
+Помимо обязательных параметров id, marketplaceId и bookingPeriod, в тело запроса опционально передать адрес и комментарий.
+
+Authentication
+AuthorizationCode
+Это API использует OAuth 2 с механизмом authorization_code. Используйте его для доступа к данным других пользователей при разработке стороннего приложения. Подробнее
+
+Security Scheme Type	OAuth2
+authorizationCode OAuth Flow	
+Authorization URL: https://avito.ru/oauth
+Token URL: https://api.avito.ru/token
+Scopes:
+ClientCredentials
+Это API использует OAuth 2 с механизмом client_credentials. Используйте его для доступа к возможностям своей личной учетной записи. Подробнее
+
+Security Scheme Type	OAuth2
+clientCredentials OAuth Flow	
+Token URL: https://api.avito.ru/token
+Scopes:
+Передача честного знака
+Метод для передачи честного знака для товаров в заказе. Максимальное количество элементов в одном запросе - 50. Максимальное количество запросов в минуту - 100.
+
+Authorizations:
+ClientCredentials
+header Parameters
+Authorization
+required
+string
+Example: Bearer ACCESS_TOKEN
+Токен для авторизации
+
+Request Body schema: application/json
+markings	
+Array of objects (marking)
+Массив маркировок, которые требуется передать
+
+Responses
+200 Success
+400 Bad request
+401 Unauthorized
+403 Forbidden
+429 Too Many Requests
+500 Internal Error
+
+post
+/order-management/1/markings
+Request samples
+Payload
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"markings": [
+{}
+]
+}
+Response samples
+200400401403429500
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"results": [
+{}
+]
+}
+Выбор отделения отделения Почты России для получения возврата
+Данный метод применяется для подтверждения возврата товара и выбора отделения Почты России, куда будет доставлен возврат. Максимальное количество запросов в минуту - 100.
+
+Authorizations:
+ClientCredentials
+header Parameters
+Authorization
+required
+string
+Example: Bearer ACCESS_TOKEN
+Токен для авторизации
+
+Request Body schema: application/json
+orderId	
+string
+ID заказа в Авито
+
+recipient	
+object
+Данные человека, который будет забирать возвратную посылку
+
+terminalNumber	
+string
+Номер отделения Почты России, куда придёт возвратная посылка.
+
+Responses
+200 Success
+400 Bad request
+401 Unauthorized
+403 Forbidden
+429 Too Many Requests
+500 Internal Error
+
+post
+/order-management/1/order/acceptReturnOrder
+Request samples
+Payload
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"orderId": "50000000000000000",
+"recipient": {
+"name": "Иванов Иван Иванович",
+"phone": "+79999999999"
+},
+"terminalNumber": "141138"
+}
+Response samples
+200400401403429500
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"success": false
+}
+Изменение статуса заказа
+Данный метод применяется для изменения статуса заказа, в частности для подтверждения или отмены заказа. Максимальное количество запросов в минуту - 100.
+
+Authorizations:
+ClientCredentials
+header Parameters
+Authorization
+required
+string
+Example: Bearer ACCESS_TOKEN
+Токен для авторизации
+
+Request Body schema: application/json
+orderId	
+string
+ID заказа в Авито
+
+params	
+object Nullable
+Дополнительные параметры доставки
+
+transition	
+string
+Enum: "confirm" "reject" "perform" "receive"
+Название перехода.
+
+confirm - подтверждение заказа;
+reject - отмена заказа;
+perform - подтверждение отправки заказа (RDBS);
+receive - подтверждение доставки заказа (RDBS, CNC).
+Responses
+200 Success
+400 Bad request
+401 Unauthorized
+403 Forbidden
+429 Too Many Requests
+500 Internal Error
+
+post
+/order-management/1/order/applyTransition
+Request samples
+Payload
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"orderId": "50000000000000000",
+"params": {
+"cnc": {}
+},
+"transition": "confirm"
+}
+Response samples
+200400401403429500
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"success": false
+}
+Метод для проверки кода подтверждения заказа.
+Данный метод используется для подтверждения личности для получения заказа в ПВЗ. Пользователь называет код из приложения сотруднику СД. Далее через API служба доставки проверяет его валидность. Максимальное количество запросов в минуту - 2000.
+
+Authorizations:
+ClientCredentials
+header Parameters
+Authorization
+required
+string
+Example: Bearer ACCESS_TOKEN
+Токен для авторизации
+
+Request Body schema: application/json
+confirmCode	
+string
+Код, который показал пользователь
+
+parcelID	
+string
+ID посылки в Авито
+
+Responses
+200 Success
+400 Bad request
+401 Unauthorized
+403 Forbidden
+429 Too Many Requests
+500 Internal Error
+
+post
+/order-management/1/order/checkConfirmationCode
+Request samples
+Payload
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"confirmCode": "string",
+"parcelID": "P00081306679"
+}
+Response samples
+200400401403429500
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"data": {
+"status": "success"
+}
+}
+Метод для подготовки заказа с самовывозом
+Данный метод применяется продавцом для подготовки заказа и передачи адреса, сроков бронирования и сообщения покупателю. Максимальное количество запросов в минуту - 60
+
+Authorizations:
+ClientCredentials
+header Parameters
+Authorization
+required
+string
+Example: Bearer ACCESS_TOKEN
+Токен для авторизации
+
+Request Body schema: application/json
+address	
+string
+Адрес получения товара
+
+bookingPeriod
+required
+integer
+Сроки бронирования товара
+
+details	
+string
+Комментарий, который получит покупатель
+
+id
+required
+string
+ID заказа в Авито
+
+marketplaceId
+required
+string
+Номер заказа в Авито в новой системе
+
+Responses
+200 Success
+400 Bad request
+401 Unauthorized
+403 Forbidden
+429 Too Many Requests
+500 Internal Error
+
+post
+/order-management/1/order/cncSetDetails
+Request samples
+Payload
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"address": "Тверская улица, 3, Москва",
+"bookingPeriod": 4,
+"details": "Могу передать товар с 13:00 до 18:00",
+"id": "5000000000000000",
+"marketplaceId": "70000000000000000"
+}
+Response samples
+200400401403429500
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"result": {
+"success": true
+},
+"status": "string"
+}
+Метод получения доступных временных промежутков приезда курьера
+Данный метод применяется для получения всех промежутков времени, когда курьер может приехать забрать товар, чтобы отвезти его покупателю. Максимальное количество запросов в минуту - 100.
+
+Authorizations:
+ClientCredentials
+query Parameters
+orderId
+required
+string non-empty
+ID заказа
+
+address	
+string non-empty Nullable
+Адрес продавца
+
+header Parameters
+Authorization
+required
+string
+Example: Bearer ACCESS_TOKEN
+Токен для авторизации
+
+Responses
+200 Success
+400 Bad request
+401 Unauthorized
+403 Forbidden
+429 Too Many Requests
+500 Internal Error
+
+get
+/order-management/1/order/getCourierDeliveryRange
+Response samples
+200400401403429500
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"result": {
+"address": "string",
+"addressDetails": "string",
+"dateOptions": [],
+"endDate": "2019-08-24T14:15:22Z",
+"name": "string",
+"phone": "string",
+"startDate": "2019-08-24T14:15:22Z"
+},
+"status": "string"
+}
+Метод выбора определённого доступного временного промежутка для приезда курьера
+Данный метод применяется после метода получения всех промежутков времени, когда курьер может приехать и забрать товар. Вызвав этот метод, продавец выбирает определённый временной промежуток приезда курьера. Также этот метод можно вызвать, чтобы изменить время приезда курьера, если он ещё не забрал посылку. Максимальное количество запросов в минуту - 200.
+
+Authorizations:
+ClientCredentials
+header Parameters
+Authorization
+required
+string
+Example: Bearer ACCESS_TOKEN
+Токен для авторизации
+
+Request Body schema: application/json
+address
+required
+string non-empty
+Адрес продавца
+
+addressDetails	
+string
+Детали адреса продавца
+
+endDate
+required
+string <date-time>
+Конечная дата приезда курьера
+
+intervalType
+required
+string
+Enum: "fixed" "asap"
+Тип интервала
+
+name
+required
+string non-empty
+ФИО
+
+orderId
+required
+string non-empty
+ID заказа
+
+phone
+required
+string non-empty
+Телефон
+
+startDate
+required
+string <date-time>
+Начальная дата приезда курьера
+
+Responses
+200 Успешный выбор времени приезда курьера
+400 Bad request
+401 Unauthorized
+403 Forbidden
+429 Too Many Requests
+500 Internal Error
+
+post
+/order-management/1/order/setCourierDeliveryRange
+Request samples
+Payload
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"address": "string",
+"addressDetails": "string",
+"endDate": "2019-08-24T14:15:22Z",
+"intervalType": "fixed",
+"name": "string",
+"orderId": "string",
+"phone": "string",
+"startDate": "2019-08-24T14:15:22Z"
+}
+Response samples
+200400401403429500
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"success": false
+}
+Передача условий доставки Deprecated
+В январе 2025 года прекращается поддержка передачи стоимости и сроков для доставки силами продавца (DBS, CDBS и RDBS). Необходимо перейти на один из существующих тарифов или создать собственный. Подробнее.
+
+Метод для передачи условий доставки для доставки силами продавца (DBS, CDBS и RDBS)
+
+Максимальное количество запросов в минуту - 100.
+
+Authorizations:
+ClientCredentials
+header Parameters
+Authorization
+required
+string
+Example: Bearer ACCESS_TOKEN
+Токен для авторизации
+
+Request Body schema: application/json
+deliveryCostRub	
+number
+Стоимость доставки в рублях
+
+deliveryDate	
+string Nullable
+Дата доставки в формате YYYY-MM-DD(iso 8601)
+
+orderId	
+string
+ID заказа в Авито
+
+Responses
+200 Success
+400 Bad request
+401 Unauthorized
+403 Forbidden
+429 Too Many Requests
+500 Internal Error
+
+post
+/order-management/1/order/setTerms
+Request samples
+Payload
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"deliveryCostRub": 500,
+"deliveryDate": "2023-02-17",
+"orderId": "50000000000000000"
+}
+Response samples
+200400401403429500
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"error": {
+"code": "delivery_date_to_low",
+"message": "Дата доставки не может быть в прошлом"
+},
+"success": false
+}
+Передача трек-номера
+Метод для передачи трек-номера для доставки партнёрами продавца (DBS, CDBS) Максимальное количество запросов в минуту - 100.
+
+Authorizations:
+ClientCredentials
+header Parameters
+Authorization
+required
+string
+Example: Bearer ACCESS_TOKEN
+Токен для авторизации
+
+Request Body schema: application/json
+orderId	
+string
+ID заказа в Авито
+
+trackingNumber	
+string
+Трек-номер посылки
+
+Responses
+200 Success
+400 Bad request
+401 Unauthorized
+403 Forbidden
+429 Too Many Requests
+500 Internal Error
+
+post
+/order-management/1/order/setTrackingNumber
+Request samples
+Payload
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"orderId": "50000000000000000",
+"trackingNumber": "01-01031002199"
+}
+Response samples
+200400401403429500
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"error": {
+"code": "already_set",
+"message": "Трек-номер уже зарегистрирован для другого заказа"
+},
+"success": false
+}
+Получение информации о заказах
+Получение информации о заказах по статусу. Максимальное количество запросов в минуту - 500.
+
+Authorizations:
+ClientCredentials
+query Parameters
+ids	
+Array of strings
+Идентификаторы заказов
+
+statuses	
+Array of strings (status)
+Items Enum: "on_confirmation" "ready_to_ship" "in_transit" "canceled" "delivered" "on_return" "in_dispute" "closed"
+Статус, по которому нужно получить заказы.
+
+on_confirmation - ожидает подтверждения
+
+ready_to_ship - ждет отправки
+
+in_transit - в пути
+
+canceled - отменный заказ
+
+delivered - доставлен покупателю
+
+on_return - на возврате
+
+in_dispute - по заказу открыт спор
+
+closed - заказ закрыт
+
+dateFrom	
+integer
+Example: dateFrom=1686735089
+Метка времени, с момента которого созданы покупки
+
+page	
+integer
+Example: page=1
+Номер страницы для пагинации
+
+limit	
+integer [ 0 .. 20 ]
+Example: limit=10
+Максимальное количество заказов на странице
+
+header Parameters
+Authorization
+required
+string
+Example: Bearer ACCESS_TOKEN
+Токен для авторизации
+
+Responses
+200 Success
+400 Bad request
+401 Unauthorized
+403 Forbidden
+429 Too Many Requests
+500 Internal Error
+
+get
+/order-management/1/orders
+Response samples
+200400401403429500
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"hasMore": true,
+"orders": [
+{}
+]
+}
+Создать задачу на генерацию этикеток (до 100).
+Создаёт задачу на генерацию PDF-этикеток для заказов (до 100 штук). Возвращает идентификатор задачи для последующей проверки статуса и скачивания результата. Максимальное количество запросов в минуту - 1000.
+
+Authorizations:
+ClientCredentials
+header Parameters
+Authorization
+required
+string
+Example: Bearer ACCESS_TOKEN
+Токен для авторизации
+
+Request Body schema: application/json
+orderIDs
+required
+Array of strings [ 1 .. 50 ] items
+ID заказов в сервисе сделок (marketplace)
+
+Responses
+200 Success
+400 Bad request
+401 Unauthorized
+403 Forbidden
+429 Too Many Requests
+500 Internal Error
+
+post
+/order-management/1/orders/labels
+Request samples
+Payload
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"orderIDs": [
+"string"
+]
+}
+Response samples
+200400401403429500
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"taskID": "string"
+}
+Создать задачу на генерацию этикеток (до 1000).
+Создаёт задачу на генерацию PDF-этикеток для заказов (до 1000 штук). Возвращает идентификатор задачи для последующей проверки статуса и скачивания результата. Максимальное количество запросов в минуту - 1.
+
+Authorizations:
+ClientCredentials
+header Parameters
+Authorization
+required
+string
+Example: Bearer ACCESS_TOKEN
+Токен для авторизации
+
+Request Body schema: application/json
+orderIDs
+required
+Array of strings [ 1 .. 50 ] items
+ID заказов в сервисе сделок (marketplace)
+
+Responses
+200 Success
+400 Bad request
+401 Unauthorized
+403 Forbidden
+429 Too Many Requests
+500 Internal Error
+
+post
+/order-management/1/orders/labels/extended
+Request samples
+Payload
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"orderIDs": [
+"string"
+]
+}
+Response samples
+200400401403429500
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"taskID": "string"
+}
+Скачать сгенерированный PDF-файл (этикетку).
+Скачивание сгенерированного PDF-файла с этикетками по идентификатору задачи. Файл доступен после успешного завершения генерации. Максимальное количество запросов в минуту - 1000.
+
+Authorizations:
+ClientCredentials
+path Parameters
+taskID
+required
+string
+ID задачи на генерацию
+
+header Parameters
+Authorization
+required
+string
+Example: Bearer ACCESS_TOKEN
+Токен для авторизации
+
+Responses
+200 Success
+400 Bad request
+401 Unauthorized
+403 Forbidden
+404 Not found
+429 Too Many Requests
+500 Internal Error
