@@ -1,4 +1,5 @@
 from datetime import datetime
+import secrets
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +30,7 @@ class AvitoAccountRepository:
         bot_id: int | None = None,
         monitoring_enabled: bool = True,
     ) -> AvitoAccount:
+        webhook_secret = secrets.token_urlsafe(16)
         account = AvitoAccount(
             client_id=client_id,
             name=name,
@@ -38,6 +40,7 @@ class AvitoAccountRepository:
             token_expires_at=expires_at,
             bot_id=bot_id,
             monitoring_enabled=monitoring_enabled,
+            webhook_secret=webhook_secret,
         )
         self.session.add(account)
         await self.session.commit()
@@ -62,3 +65,28 @@ class AvitoAccountRepository:
     async def delete(self, account: AvitoAccount) -> None:
         await self.session.delete(account)
         await self.session.commit()
+
+    async def ensure_secret(self, account: AvitoAccount) -> AvitoAccount:
+        if account.webhook_secret:
+            return account
+        account.webhook_secret = secrets.token_urlsafe(16)
+        account.updated_at = datetime.utcnow()
+        await self.session.commit()
+        await self.session.refresh(account)
+        return account
+
+    async def set_webhook_status(
+        self,
+        account: AvitoAccount,
+        *,
+        enabled: bool,
+        url: str | None,
+        last_error: str | None = None,
+    ) -> AvitoAccount:
+        account.webhook_enabled = enabled
+        account.webhook_url = url
+        account.webhook_last_error = last_error
+        account.updated_at = datetime.utcnow()
+        await self.session.commit()
+        await self.session.refresh(account)
+        return account

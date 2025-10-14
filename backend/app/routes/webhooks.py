@@ -2,14 +2,56 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from loguru import logger
 
 from app.api import deps
+from app.repositories.avito_repository import AvitoAccountRepository
 from app.repositories.bot_repository import BotRepository
 from app.repositories.telegram_chat_repository import TelegramChatRepository
 from app.services.dialog import DialogService
+from app.services.queue import TaskQueue
 from app.services.telegram import TelegramService
 
 router = APIRouter()
+
+
+@router.post("/avito/messages/{account_id}/{secret}")
+async def avito_message_webhook(
+    account_id: int,
+    secret: str,
+    request: Request,
+    session: AsyncSession = Depends(deps.get_db),
+):
+    repo = AvitoAccountRepository(session)
+    account = await repo.get(account_id)
+    if account is None or account.webhook_secret != secret:
+        logger.warning(
+            "Avito webhook attempt with invalid credentials",
+            account_id=account_id,
+        )
+        raise HTTPException(status_code=404, detail="Webhook not registered")
+
+    try:
+        payload = await request.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Invalid JSON payload from Avito webhook",
+            account_id=account.id,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+
+    logger.info("Received Avito webhook payload: {}", str(payload)[:500], account_id=account.id)
+
+    await TaskQueue.enqueue(
+        "avito.webhook_message",
+        {
+            "account_id": account.id,
+            "client_id": account.client_id,
+            "payload": payload,
+        },
+    )
+    return {"status": "accepted"}
 
 
 @router.post("/telegram/{bot_id}/{secret}")

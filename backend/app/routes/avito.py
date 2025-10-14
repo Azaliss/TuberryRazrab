@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from loguru import logger
 
 from app.api import deps
 from app.models.enums import UserRole
@@ -7,6 +8,7 @@ from app.repositories.avito_repository import AvitoAccountRepository
 from app.repositories.dialog_repository import DialogRepository
 from app.repositories.message_repository import MessageRepository
 from app.schemas.avito import AvitoAccountCreateRequest, AvitoAccountResponse, AvitoAccountUpdateRequest
+from app.services.avito import AvitoService
 
 router = APIRouter()
 
@@ -43,6 +45,15 @@ async def create_account(
         bot_id=payload.bot_id,
         monitoring_enabled=payload.monitoring_enabled if payload.monitoring_enabled is not None else True,
     )
+    service = AvitoService()
+    try:
+        await service.ensure_webhook_for_account(account, repo)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "Failed to register Avito webhook after account creation",
+            account_id=account.id,
+            error=str(exc),
+        )
     return account
 
 
@@ -60,6 +71,15 @@ async def update_account(
     if user.role not in (UserRole.owner, UserRole.admin):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
     account = await repo.update(account, **payload.dict(exclude_unset=True))
+    service = AvitoService()
+    try:
+        await service.ensure_webhook_for_account(account, repo)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "Failed to register Avito webhook after account update",
+            account_id=account.id,
+            error=str(exc),
+        )
     return account
 
 

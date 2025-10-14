@@ -24,6 +24,10 @@ class AvitoAccount(TimestampedModel, table=True):
     status: AvitoAccountStatus = Field(default=AvitoAccountStatus.active)
     bot_id: Optional[int] = Field(default=None, foreign_key="bots.id")
     monitoring_enabled: bool = Field(default=True)
+    webhook_secret: Optional[str] = Field(default=None, index=True)
+    webhook_url: Optional[str] = Field(default=None)
+    webhook_enabled: bool = Field(default=False, nullable=False)
+    webhook_last_error: Optional[str] = Field(default=None)
 
     client: "Client" = Relationship(back_populates="avito_accounts")
     dialogs: list["Dialog"] = Relationship(back_populates="avito_account")

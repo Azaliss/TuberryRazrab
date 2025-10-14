@@ -1,9 +1,9 @@
 {
-  email admin@tuberry.ru
+  email admin@tgmcrm.ru
   acme_ca https://acme-v02.api.letsencrypt.org/directory
 }
 
-tuberry.ru {
+tgmcrm.ru {
   encode gzip
 
   @apiPath path /api/*
@@ -16,6 +16,6 @@ tuberry.ru {
   }
 }
 
-www.tuberry.ru {
-  redir https://tuberry.ru{uri} permanent
+www.tgmcrm.ru {
+  redir https://tgmcrm.ru{uri} permanent
 }

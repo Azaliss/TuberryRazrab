@@ -21,6 +21,8 @@ class AvitoService:
 
     def __init__(self) -> None:
         self._user_cache: dict[int, str] = {}
+        events = settings.avito_webhook_events or ["message"]
+        self._webhook_events: list[str] = [str(event) for event in events]
 
     @staticmethod
     def extract_message_id(payload: Dict[str, Any] | None) -> str | None:
@@ -267,6 +269,78 @@ class AvitoService:
         if isinstance(voices, dict):
             return {str(key): value for key, value in voices.items() if isinstance(value, str)}
         return {}
+
+    def compose_webhook_url(self, account_id: int, secret: str) -> str:
+        base = settings.webhook_base_url.rstrip("/")
+        return f"{base}/api/webhooks/avito/messages/{account_id}/{secret}"
+
+    async def ensure_webhook_for_account(
+        self,
+        account: AvitoAccount,
+        repo: AvitoAccountRepository,
+    ) -> Dict[str, Any]:
+        account = await repo.ensure_secret(account)
+        target_url = self.compose_webhook_url(account.id, account.webhook_secret)
+
+        async with self._account_context(int(account.id)) as (scoped_account, scoped_repo):
+            access_token = await self._ensure_access_token(scoped_account, scoped_repo)
+
+        payload = {"url": target_url, "events": self._webhook_events}
+
+        response_json: Dict[str, Any] = {}
+        endpoints = [
+            "/messenger/v3/webhook",
+            "/messenger/v1/webhook",
+            "/messenger/v1/webhooks",
+        ]
+        last_error: str | None = None
+
+        async with httpx.AsyncClient(base_url=settings.avito_api_base, timeout=15.0) as client:
+            for endpoint in endpoints:
+                response = await client.post(
+                    endpoint,
+                    json=payload,
+                    headers=self._build_headers(access_token),
+                )
+                if response.status_code in (200, 201, 202, 204):
+                    try:
+                        response_json = response.json()
+                    except Exception:  # noqa: BLE001
+                        response_json = {"status": "registered"}
+                    break
+                if response.status_code == 409:
+                    logger.info(
+                        "Webhook already registered with Avito",
+                        account_id=account.id,
+                        url=target_url,
+                    )
+                    response_json = {"status": "already_registered"}
+                    break
+                if response.status_code in (404, 410):
+                    try:
+                        error_payload = response.json()
+                    except Exception:  # noqa: BLE001
+                        error_payload = response.text
+                    last_error = str(error_payload)
+                    logger.info(
+                        "Avito webhook endpoint %s not available (%s)",
+                        endpoint,
+                        response.status_code,
+                    )
+                    continue
+                try:
+                    error_payload = response.json()
+                except Exception:  # noqa: BLE001
+                    error_payload = response.text
+                last_error = str(error_payload)
+                await repo.set_webhook_status(account, enabled=False, url=target_url, last_error=last_error)
+                response.raise_for_status()
+            else:
+                await repo.set_webhook_status(account, enabled=False, url=target_url, last_error=last_error)
+                raise RuntimeError(f"Failed to register Avito webhook: {last_error or 'unknown error'}")
+
+        await repo.set_webhook_status(account, enabled=True, url=target_url, last_error=None)
+        return {"url": target_url, "response": response_json}
 
     @asynccontextmanager
     async def _account_context(

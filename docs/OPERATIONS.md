@@ -75,7 +75,10 @@ docker compose up -d --build        # пересобрать backend/frontend/ma
 - **Telegram webhook** — `https://tuberry.ru/api/webhooks/telegram/<BOT_ID>/<WEBHOOK_SECRET>`. `BOT_ID` — первичный ключ в таблице `bots`, `WEBHOOK_SECRET` автоматически генерируется при создании/обновлении бота и хранится там же.
 - **Проверка секрета** — посмотреть значения можно командой `SELECT id, bot_username, webhook_secret FROM bots;`. При необходимости регенерируйте через UI (повторная установка вебхука) или отдельный скрипт.
 - **Команда `/getid`** — работает во всех чатах, позволяет подтвердить `chat_id` и `message_thread_id` для topик-режима.
-- **Avito входящие** — доставляются через polling (см. раздел ниже). Вебхук `/api/webhooks/avito` оставлен для совместимости, но в продакшене основной источник — poller.
+- **Avito входящие** — используются вебхуки и резервный polling:
+  - Вебхук `/api/webhooks/avito/messages/{account_id}/{secret}` регистрируется автоматически после добавления аккаунта. Статус можно проверить запросом `SELECT id, webhook_enabled, webhook_url, webhook_last_error FROM avito_accounts;`.
+  - При ошибке регистрации обновите креды аккаунта — сервис повторно вызовет `ensure_webhook_for_account`. В логе backend появится предупреждение с деталями ошибки Avito.
+  - Poller (`app/workers/avito_poller.py`) продолжает работать как резервный механизм на случай недоставки вебхуков.
 - **Поддерживаемые вложения** — из Avito в Telegram прилетают текст, изображения и голосовые сообщения; в обратную сторону Avito API допускает только текст и изображения (voice-доставку платформа не предоставляет).
 - **Локальная разработка** — без публичного адреса используйте `ngrok`/`localtunnel` и пропишите URL в `WEBHOOK_BASE_URL`.
 

@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     webhook_base_url: str = "http://localhost:8080"
     backend_internal_url: str = "http://localhost:8000"
     frontend_base_url: str = "http://localhost:3000"
+    avito_webhook_events: List[str] = ["message"]
 
     admin_basic_username: str = "admin"
     admin_basic_password: str = "30080724"

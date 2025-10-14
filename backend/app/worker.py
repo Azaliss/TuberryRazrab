@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
@@ -9,6 +9,263 @@ from app.services.dialog import DialogService
 from app.services.avito import AvitoService
 from app.services.queue import TaskQueue
 from app.services.telegram import TelegramService
+from app.repositories.avito_repository import AvitoAccountRepository
+
+
+def _first_non_empty(*values: Optional[Any]) -> Optional[Any]:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str) and value.strip() == "":
+            continue
+        return value
+    return None
+
+
+def _ensure_list(candidate: Any) -> List[Any]:
+    if candidate is None:
+        return []
+    if isinstance(candidate, list):
+        return candidate
+    return [candidate]
+
+
+def _build_message_from_value(value: dict[str, Any], *, fallback_item_title: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    if not isinstance(value, dict):
+        return None
+
+    content = value.get("content") if isinstance(value.get("content"), dict) else {}
+    text = _first_non_empty(
+        content.get("text"),
+        content.get("value"),
+        value.get("text"),
+        value.get("body"),
+    )
+
+    attachments: List[Dict[str, Any]] = []
+    attachments_block = content.get("attachments") if isinstance(content.get("attachments"), list) else []
+    for item in attachments_block:
+        if isinstance(item, dict):
+            att_type = str(item.get("type") or item.get("kind") or "unknown").lower()
+            attachments.append({"type": att_type, "payload": item})
+
+    image_payload = content.get("image")
+    if isinstance(image_payload, (dict, list)):
+        attachments.append({"type": "image", "payload": image_payload})
+
+    images_payload = content.get("images")
+    if isinstance(images_payload, (dict, list)):
+        attachments.append({"type": "image", "payload": images_payload})
+
+    voice_payload = content.get("voice")
+    if isinstance(voice_payload, dict):
+        attachments.append(
+            {
+                "type": "voice",
+                "voice_id": voice_payload.get("voice_id") or voice_payload.get("id"),
+                "payload": voice_payload,
+            }
+        )
+
+    dialog_id = _first_non_empty(
+        value.get("chat_id"),
+        value.get("chatId"),
+        value.get("dialog_id"),
+        value.get("conversation_id"),
+    )
+    if dialog_id is None:
+        return None
+
+    sender = _first_non_empty(
+        value.get("author_name"),
+        value.get("author_username"),
+        value.get("author_id"),
+        value.get("user_id"),
+    )
+    author_id = _first_non_empty(
+        value.get("author_id"),
+        value.get("user_id"),
+    )
+
+    item_title = _first_non_empty(
+        fallback_item_title,
+        value.get("item_title"),
+    )
+    if item_title is None:
+        item_id = value.get("item_id")
+        if item_id:
+            item_title = f"Avito item {item_id}"
+
+    message_type = value.get("type") or content.get("type")
+    source_message_id = _first_non_empty(
+        value.get("id"),
+        value.get("message_id"),
+        value.get("uuid"),
+    )
+
+    if not text and not attachments:
+        logger.debug("Skipping Avito webhook message without textual or attachment content", message=value)
+        return None
+
+    return {
+        "dialog_id": str(dialog_id),
+        "text": text or "",
+        "sender": str(sender) if sender is not None else None,
+        "item_title": item_title,
+        "attachments": attachments,
+        "message_type": message_type,
+        "source_message_id": str(source_message_id) if source_message_id else None,
+        "author_id": str(author_id) if author_id is not None else None,
+    }
+
+
+def parse_avito_webhook_payload(body: Any) -> List[Dict[str, Any]]:
+    if not isinstance(body, (dict, list)):
+        return []
+
+    entries = body if isinstance(body, list) else [body]
+    results: List[Dict[str, Any]] = []
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+
+        payload = entry.get("payload")
+        if isinstance(payload, dict):
+            event_type = payload.get("type") or entry.get("type")
+            if event_type == "message":
+                value = payload.get("value")
+                built = _build_message_from_value(value, fallback_item_title=None) if isinstance(value, dict) else None
+                if built:
+                    results.append(built)
+                    continue
+
+        payload_candidates: list[dict[str, Any]] = []
+        if isinstance(payload, dict):
+            for key in ("data", "value", "message"):
+                candidate = payload.get(key)
+                if isinstance(candidate, dict):
+                    payload_candidates.append(candidate)
+            payload_candidates.append(payload)
+        else:
+            payload_candidates.append(entry)
+
+        seen_ids: set[str] = set()
+        for base in payload_candidates:
+            if not isinstance(base, dict):
+                continue
+
+            context = base.get("context")
+            if isinstance(context, dict):
+                context_value = context.get("value") if isinstance(context.get("value"), dict) else {}
+            else:
+                context_value = {}
+
+            item_title = _first_non_empty(
+                base.get("item_title"),
+                base.get("title"),
+                context_value.get("title"),
+            )
+
+            candidates = _ensure_list(base.get("messages"))
+            if not candidates:
+                candidates = [base]
+
+            for candidate in candidates:
+                built = _build_message_from_value(candidate, fallback_item_title=item_title)
+                if built is None:
+                    continue
+                msg_id = built.get("source_message_id") or f"{built.get('dialog_id')}:{built.get('text')}"
+                if msg_id in seen_ids:
+                    continue
+                seen_ids.add(msg_id)
+                results.append(built)
+
+    return results
+
+
+async def process_avito_webhook_message(payload: Dict[str, Any]) -> None:
+    account_id = payload.get("account_id")
+    body = payload.get("payload")
+    client_id = payload.get("client_id")
+
+    if account_id is None or body is None:
+        logger.warning("Webhook payload missing account_id or payload", payload=payload)
+        return
+
+    try:
+        account_id_int = int(account_id)
+    except (TypeError, ValueError):
+        logger.warning("Invalid account_id in webhook payload", payload=payload)
+        return
+
+    async with SessionLocal() as session:
+        repo = AvitoAccountRepository(session)
+        account = await repo.get(account_id_int)
+        if account is None:
+            logger.warning("Received webhook for unknown Avito account", account_id=account_id_int)
+            return
+        resolved_client_id = client_id or account.client_id
+        if resolved_client_id is None:
+            logger.warning("Avito account not attached to client", account_id=account.id)
+            return
+
+        dialog_service = DialogService(session)
+        messages = parse_avito_webhook_payload(body)
+        if not messages:
+            logger.info(
+                "Avito webhook payload did not contain parsable messages: {}",
+                str(body)[:500],
+                account_id=account.id,
+            )
+            return
+
+        service = AvitoService()
+        account_user_id: Optional[str] = None
+        try:
+            access_token = await service._ensure_access_token(account, repo)
+            account_user_id = await service._get_account_user_id(account.id, access_token)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to resolve Avito account user id",
+                account_id=account.id,
+                error=str(exc),
+            )
+
+        for message in messages:
+            try:
+                author_id = message.get("author_id")
+                if (
+                    account_user_id is not None
+                    and author_id is not None
+                    and str(author_id) == str(account_user_id)
+                ):
+                    logger.debug(
+                        "Skipping Avito echo message from account owner",
+                        account_id=account.id,
+                        dialog_id=message.get("dialog_id"),
+                        author_id=author_id,
+                    )
+                    continue
+
+                await dialog_service.handle_avito_message(
+                    client_id=resolved_client_id,
+                    avito_account_id=account.id,
+                    avito_dialog_id=message["dialog_id"],
+                    message_text=message.get("text"),
+                    sender=message.get("sender"),
+                    item_title=message.get("item_title"),
+                    source_message_id=message.get("source_message_id"),
+                    attachments=message.get("attachments"),
+                    message_type=message.get("message_type"),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "Failed to process Avito webhook message",
+                    account_id=account.id,
+                    dialog_id=message.get("dialog_id"),
+                    error=str(exc),
+                )
 
 
 async def finalize_outbound_status(payload: Dict[str, Any], default_status: str = "outgoing") -> None:
@@ -227,6 +484,11 @@ async def main() -> None:
             except Exception as exc:  # noqa: BLE001 - логируем любую ошибку, чтобы воркер не падал
                 logger.exception("Failed to send message to Avito", error=str(exc), payload=payload)
                 await handle_outbound_failure(payload)
+        elif task_type == "avito.webhook_message":
+            try:
+                await process_avito_webhook_message(payload)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Failed to process avito webhook message", error=str(exc), payload=payload)
         else:
             logger.warning("Unknown task type: {task_type}", task_type=task_type)
 

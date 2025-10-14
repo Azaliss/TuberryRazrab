@@ -51,3 +51,23 @@ async def init_db() -> None:
                     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_client_message BOOLEAN DEFAULT FALSE"
                 )
             )
+            await conn.execute(
+                text(
+                    "ALTER TABLE avito_accounts ADD COLUMN IF NOT EXISTS webhook_secret VARCHAR"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE avito_accounts ADD COLUMN IF NOT EXISTS webhook_url VARCHAR"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE avito_accounts ADD COLUMN IF NOT EXISTS webhook_enabled BOOLEAN DEFAULT FALSE"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE avito_accounts ADD COLUMN IF NOT EXISTS webhook_last_error TEXT"
+                )
+            )

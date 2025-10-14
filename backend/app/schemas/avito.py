@@ -19,6 +19,9 @@ class AvitoAccountResponse(BaseModel):
     bot_id: Optional[int]
     created_at: datetime
     monitoring_enabled: bool
+    webhook_enabled: bool
+    webhook_url: Optional[str]
+    webhook_last_error: Optional[str]
 
 
 class AvitoAccountCreateRequest(BaseModel):
