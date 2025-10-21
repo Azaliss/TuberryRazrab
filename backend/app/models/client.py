@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from app.models.user import User
     from app.models.bot import Bot
     from app.models.avito import AvitoAccount
+    from app.models.telegram_source import TelegramSource
 
 
 class Client(TimestampedModel, table=True):
@@ -33,6 +34,7 @@ class Client(TimestampedModel, table=True):
     users: List["User"] = Relationship(back_populates="client")
     bots: List["Bot"] = Relationship(back_populates="client")
     avito_accounts: List["AvitoAccount"] = Relationship(back_populates="client")
+    telegram_sources: List["TelegramSource"] = Relationship(back_populates="client")
 
 
 class ClientCreate(SQLModel):

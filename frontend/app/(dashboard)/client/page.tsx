@@ -265,31 +265,41 @@ export default function ClientDashboardPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Avito ID</TableHead>
-                <TableHead>Topic</TableHead>
+                <TableHead>Источник</TableHead>
+                <TableHead>Идентификатор</TableHead>
+                <TableHead>Дополнительно</TableHead>
                 <TableHead>Последнее сообщение</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={4} className="py-6 text-center text-sm text-muted-foreground">
                     Загружаем диалоги…
                   </TableCell>
                 </TableRow>
               ) : latestDialogs.length > 0 ? (
                 latestDialogs.map((dialog) => (
                   <TableRow key={dialog.id}>
-                    <TableCell className="font-medium">{dialog.avito_dialog_id}</TableCell>
-                    <TableCell className="font-mono text-sm text-muted-foreground">
-                      {dialog.telegram_topic_id ?? '—'}
+                    <TableCell className="font-medium">
+                      {dialog.source === 'telegram' ? 'Telegram' : 'Avito'}
+                    </TableCell>
+                    <TableCell className="text-sm text-foreground">
+                      {dialog.source === 'telegram'
+                        ? dialog.external_display_name || dialog.external_username || dialog.external_reference || '—'
+                        : dialog.avito_dialog_id}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {dialog.source === 'telegram'
+                        ? dialog.external_reference ? `ID: ${dialog.external_reference}` : '—'
+                        : dialog.telegram_topic_id ?? '—'}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{formatDate(dialog.last_message_at)}</TableCell>
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={4} className="py-6 text-center text-sm text-muted-foreground">
                     Активных диалогов пока нет
                   </TableCell>
                 </TableRow>

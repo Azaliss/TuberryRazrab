@@ -8,6 +8,7 @@ from app.models.event import WebhookEvent
 from app.models.audit import AuditLog
 from app.models.settings import ProjectSettings
 from app.models.telegram_chat import TelegramChat
+from app.models.telegram_source import TelegramSource
 
 __all__ = [
     "User",
@@ -20,4 +21,5 @@ __all__ = [
     "AuditLog",
     "ProjectSettings",
     "TelegramChat",
+    "TelegramSource",
 ]

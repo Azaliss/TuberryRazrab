@@ -17,12 +17,17 @@ export interface AvitoAccount {
 
 export interface Dialog {
   id: number;
+  source: 'avito' | 'telegram';
+  telegram_source_id?: number;
   avito_dialog_id: string;
   telegram_topic_id?: string;
   last_message_at?: string;
   telegram_chat_id?: string;
   state?: string;
   created_at?: string;
+  external_reference?: string;
+  external_display_name?: string;
+  external_username?: string;
 }
 
 export interface ClientProfile {
@@ -49,11 +54,22 @@ export interface TelegramChat {
 
 export interface DialogMessage {
   id: number;
-  direction: 'avito' | 'telegram';
+  direction: 'avito' | 'telegram' | 'telegram_source_in' | 'telegram_source_out';
   body: string;
   status: string;
   created_at?: string;
   attachments?: unknown;
+}
+
+export interface TelegramSource {
+  id: number;
+  bot_id: number;
+  display_name?: string;
+  bot_username?: string;
+  status: string;
+  webhook_secret?: string;
+  webhook_url?: string;
+  description?: string;
 }
 
 export interface DialogDetail {

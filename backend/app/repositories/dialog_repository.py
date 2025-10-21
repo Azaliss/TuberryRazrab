@@ -4,6 +4,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dialog import Dialog
+from app.models.enums import DialogSource
 
 
 class DialogRepository:
@@ -12,7 +13,11 @@ class DialogRepository:
 
     async def get_by_avito(self, client_id: int, avito_dialog_id: str) -> Dialog | None:
         result = await self.session.execute(
-            select(Dialog).where(Dialog.client_id == client_id, Dialog.avito_dialog_id == avito_dialog_id)
+            select(Dialog).where(
+                Dialog.client_id == client_id,
+                Dialog.avito_dialog_id == avito_dialog_id,
+                Dialog.source == DialogSource.avito.value,
+            )
         )
         return result.scalar_one_or_none()
 
@@ -35,12 +40,18 @@ class DialogRepository:
             select(Dialog).where(
                 Dialog.avito_account_id == avito_account_id,
                 Dialog.avito_dialog_id == avito_dialog_id,
+                Dialog.source == DialogSource.avito.value,
             )
         )
         return result.scalar_one_or_none()
 
     async def list_for_avito_account(self, account_id: int) -> list[Dialog]:
-        result = await self.session.execute(select(Dialog).where(Dialog.avito_account_id == account_id))
+        result = await self.session.execute(
+            select(Dialog).where(
+                Dialog.avito_account_id == account_id,
+                Dialog.source == DialogSource.avito.value,
+            )
+        )
         return list(result.scalars().all())
 
     async def list_for_bot(self, bot_id: int) -> list[Dialog]:
@@ -60,26 +71,60 @@ class DialogRepository:
         self,
         *,
         client_id: int,
-        avito_account_id: int,
         bot_id: int,
         avito_dialog_id: str,
+        avito_account_id: int | None = None,
+        source: DialogSource = DialogSource.avito,
         telegram_chat_id: str | None,
         telegram_topic_id: str | None,
+        telegram_source_id: int | None = None,
+        external_reference: str | None = None,
+        external_display_name: str | None = None,
+        external_username: str | None = None,
     ) -> Dialog:
         dialog = Dialog(
             client_id=client_id,
             avito_account_id=avito_account_id,
+            source=source.value if isinstance(source, DialogSource) else source,
+            telegram_source_id=telegram_source_id,
             bot_id=bot_id,
             avito_dialog_id=avito_dialog_id,
             telegram_chat_id=telegram_chat_id,
             telegram_topic_id=telegram_topic_id,
             last_message_at=datetime.utcnow(),
             topic_intro_sent=False,
+            external_reference=external_reference,
+            external_display_name=external_display_name,
+            external_username=external_username,
         )
         self.session.add(dialog)
         await self.session.commit()
         await self.session.refresh(dialog)
         return dialog
+
+    async def get_by_telegram_source(
+        self,
+        *,
+        telegram_source_id: int,
+        external_reference: str,
+    ) -> Dialog | None:
+        result = await self.session.execute(
+            select(Dialog).where(
+                Dialog.telegram_source_id == telegram_source_id,
+                Dialog.external_reference == external_reference,
+                Dialog.source == DialogSource.telegram.value,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_for_telegram_source(self, telegram_source_id: int) -> list[Dialog]:
+        result = await self.session.execute(
+            select(Dialog).where(
+                Dialog.telegram_source_id == telegram_source_id,
+                Dialog.source == DialogSource.telegram.value,
+            )
+        )
+        return list(result.scalars().all())
 
     async def touch(self, dialog: Dialog) -> Dialog:
         dialog.last_message_at = datetime.utcnow()
@@ -135,3 +180,4 @@ class DialogRepository:
 
     async def delete(self, dialog: Dialog) -> None:
         await self.session.delete(dialog)
+        await self.session.commit()

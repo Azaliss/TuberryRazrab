@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bot import Bot
 from app.models.dialog import Dialog
-from app.models.enums import BotStatus, MessageDirection, MessageStatus
+from app.models.enums import BotStatus, DialogSource, MessageDirection, MessageStatus
 from app.db.session import SessionLocal
 from app.repositories.avito_repository import AvitoAccountRepository
 from app.repositories.bot_repository import BotRepository
@@ -512,9 +512,10 @@ class DialogService:
                 )
             dialog = await self.dialog_repo.create(
                 client_id=client_id,
-                avito_account_id=avito_account_id,
                 bot_id=bot.id,
                 avito_dialog_id=avito_dialog_id,
+                avito_account_id=avito_account_id,
+                source=DialogSource.avito,
                 telegram_chat_id=telegram_chat_id,
                 telegram_topic_id=str(topic_id) if topic_id else None,
             )
@@ -1593,6 +1594,17 @@ class DialogService:
         else:
             telegram_topic_id = dialog.telegram_topic_id
 
+        if dialog.source == DialogSource.telegram.value:
+            from app.services.telegram_source import TelegramSourceService
+
+            telegram_source_service = TelegramSourceService(self.session)
+            return await telegram_source_service.handle_manager_reply(
+                dialog=dialog,
+                bot=bot,
+                telegram_message=telegram_message,
+                message_id=message_id,
+            )
+
         client = await self.client_repo.get_by_id(dialog.client_id)
         require_reply = bool(getattr(client, "require_reply_for_avito", False)) if client else False
 
@@ -1644,7 +1656,7 @@ class DialogService:
         enqueue_results: list[dict[str, Any]] = []
         status_should_update = False
 
-        if should_enqueue and text:
+        if should_enqueue and text and dialog.source != DialogSource.telegram.value:
             await TaskQueue.enqueue(
                 "avito.send_message",
                 {
@@ -1669,7 +1681,7 @@ class DialogService:
                 dialog.client_id,
             )
 
-        if should_enqueue and attachment_records:
+        if should_enqueue and attachment_records and dialog.source != DialogSource.telegram.value:
             for attachment in attachment_records:
                 kind = attachment.get("type")
                 if kind == "photo":

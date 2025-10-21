@@ -1,6 +1,6 @@
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
@@ -8,9 +8,11 @@ from app.api import deps
 from app.repositories.avito_repository import AvitoAccountRepository
 from app.repositories.bot_repository import BotRepository
 from app.repositories.telegram_chat_repository import TelegramChatRepository
+from app.repositories.telegram_source_repository import TelegramSourceRepository
 from app.services.dialog import DialogService
 from app.services.queue import TaskQueue
 from app.services.telegram import TelegramService
+from app.services.telegram_source import TelegramSourceService
 
 router = APIRouter()
 
@@ -251,6 +253,44 @@ async def _handle_my_chat_member_update(
         "status": status,
         "is_active": chat.is_active,
     }
+
+
+@router.post("/source-telegram/{source_id}/{secret}")
+async def telegram_source_webhook(
+    source_id: int,
+    secret: str,
+    request: Request,
+    session: AsyncSession = Depends(deps.get_db),
+):
+    repo = TelegramSourceRepository(session)
+    source = await repo.get(source_id)
+    if source is None or source.webhook_secret != secret:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Webhook not registered")
+
+    try:
+        payload = await request.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Invalid JSON payload from Telegram source webhook",
+            source_id=source_id,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload") from exc
+
+    service = TelegramSourceService(session)
+    try:
+        result = await service.handle_incoming_update(source=source, payload=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "Failed to process Telegram source webhook",
+            source_id=source_id,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to process webhook") from exc
+
+    return {"status": "ok", "data": result}
 
 
 @router.post("/avito")

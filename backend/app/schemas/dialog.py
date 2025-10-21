@@ -3,7 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import DialogState
+from app.models.enums import DialogSource, DialogState
 
 
 class DialogResponse(BaseModel):
@@ -11,7 +11,9 @@ class DialogResponse(BaseModel):
 
     id: int
     client_id: int
-    avito_account_id: int
+    source: DialogSource
+    avito_account_id: Optional[int]
+    telegram_source_id: Optional[int]
     bot_id: int
     avito_dialog_id: str
     telegram_chat_id: Optional[str]
@@ -19,6 +21,9 @@ class DialogResponse(BaseModel):
     state: DialogState
     last_message_at: Optional[datetime]
     created_at: datetime
+    external_reference: Optional[str] = None
+    external_display_name: Optional[str] = None
+    external_username: Optional[str] = None
 
 
 class DialogMessagesResponse(BaseModel):

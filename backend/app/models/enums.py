@@ -13,6 +13,12 @@ class BotStatus(str, Enum):
     error = "error"
 
 
+class TelegramSourceStatus(str, Enum):
+    active = "active"
+    inactive = "inactive"
+    error = "error"
+
+
 class AvitoAccountStatus(str, Enum):
     active = "active"
     expired = "expired"
@@ -27,6 +33,8 @@ class DialogState(str, Enum):
 class MessageDirection(str, Enum):
     avito = "avito"
     telegram = "telegram"
+    telegram_source_in = "telegram_source_in"
+    telegram_source_out = "telegram_source_out"
 
 
 class MessageStatus(str, Enum):
@@ -39,3 +47,8 @@ class MessageStatus(str, Enum):
 class AutoReplyMode(str, Enum):
     always = "always"
     first = "first"
+
+
+class DialogSource(str, Enum):
+    avito = "avito"
+    telegram = "telegram"

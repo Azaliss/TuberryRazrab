@@ -71,3 +71,33 @@ async def init_db() -> None:
                     "ALTER TABLE avito_accounts ADD COLUMN IF NOT EXISTS webhook_last_error TEXT"
                 )
             )
+            await conn.execute(
+                text(
+                    "ALTER TABLE dialogs ALTER COLUMN avito_account_id DROP NOT NULL"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE dialogs ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'avito'"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE dialogs ADD COLUMN IF NOT EXISTS telegram_source_id INTEGER"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE dialogs ADD COLUMN IF NOT EXISTS external_reference VARCHAR"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE dialogs ADD COLUMN IF NOT EXISTS external_display_name VARCHAR"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE dialogs ADD COLUMN IF NOT EXISTS external_username VARCHAR"
+                )
+            )

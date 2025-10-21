@@ -89,7 +89,21 @@ async def create_bot(
         f"{bot.webhook_secret}"
     )
     try:
-        await service.set_webhook(webhook_url)
+        await service.set_webhook(
+            webhook_url,
+            secret_token=bot.webhook_secret,
+            allowed_updates=[
+                "message",
+                "edited_message",
+                "channel_post",
+                "edited_channel_post",
+                "callback_query",
+                "chat_member",
+                "my_chat_member",
+                "chat_join_request",
+            ],
+            drop_pending_updates=True,
+        )
     except Exception as exc:  # noqa: BLE001
         if not existing:
             await repo.delete(bot)
@@ -189,6 +203,12 @@ async def delete_bot(
     dialog_repo = DialogRepository(session)
     message_repo = MessageRepository(session)
     avito_repo = AvitoAccountRepository(session)
+
+    service = TelegramService(bot.token)
+    try:
+        await service.delete_webhook(drop_pending_updates=True)
+    except Exception:  # noqa: BLE001
+        pass
 
     dialogs = await dialog_repo.list_for_bot(bot.id)
     dialog_ids = [dialog.id for dialog in dialogs]

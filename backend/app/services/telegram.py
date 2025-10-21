@@ -194,8 +194,26 @@ class TelegramService:
     async def create_topic(self, chat_id: str, name: str) -> Dict[str, Any]:
         return await self._post("createForumTopic", {"chat_id": chat_id, "name": name[:128]})
 
-    async def set_webhook(self, url: str) -> Dict[str, Any]:
-        return await self._post("setWebhook", {"url": url})
+    async def set_webhook(
+        self,
+        url: str,
+        *,
+        secret_token: Optional[str] = None,
+        allowed_updates: Optional[list[str]] = None,
+        drop_pending_updates: bool = False,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"url": url}
+        if secret_token:
+            payload["secret_token"] = secret_token
+        if allowed_updates:
+            payload["allowed_updates"] = allowed_updates
+        if drop_pending_updates:
+            payload["drop_pending_updates"] = True
+        return await self._post("setWebhook", payload)
+
+    async def delete_webhook(self, *, drop_pending_updates: bool = False) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"drop_pending_updates": drop_pending_updates}
+        return await self._post("deleteWebhook", payload)
 
     async def delete_forum_topic(self, chat_id: str, message_thread_id: int) -> Dict[str, Any]:
         return await self._post(

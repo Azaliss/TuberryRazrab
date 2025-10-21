@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
+from app.models.enums import DialogSource
 from app.repositories.dialog_repository import DialogRepository
 from app.repositories.message_repository import MessageRepository
 from app.schemas.dialog import (
@@ -82,6 +83,12 @@ async def send_dialog_message(
     dialog = await dialog_repo.get(dialog_id)
     if dialog is None or dialog.client_id != user.client_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dialog not found")
+
+    if dialog.source == DialogSource.telegram.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Отправка сообщений из кабинета недоступна для Telegram источников",
+        )
 
     service = DialogService(session)
     try:

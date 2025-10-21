@@ -11,6 +11,11 @@ from app.schemas.client import ClientCreateRequest, ClientResponse, ClientUpdate
 from app.schemas.bot import BotCreateRequest, BotResponse, BotUpdateRequest
 from app.schemas.avito import AvitoAccountCreateRequest, AvitoAccountResponse, AvitoAccountUpdateRequest
 from app.schemas.dialog import DialogMessagesResponse, DialogResponse
+from app.schemas.telegram_source import (
+    TelegramSourceCreateRequest,
+    TelegramSourceResponse,
+    TelegramSourceUpdateRequest,
+)
 
 __all__ = [
     "BootstrapAdminRequest",
@@ -31,4 +36,7 @@ __all__ = [
     "AvitoAccountUpdateRequest",
     "DialogMessagesResponse",
     "DialogResponse",
+    "TelegramSourceCreateRequest",
+    "TelegramSourceResponse",
+    "TelegramSourceUpdateRequest",
 ]

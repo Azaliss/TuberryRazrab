@@ -142,6 +142,10 @@ export default function DialogsPage() {
       if (!selectedDialogId) return;
       const trimmed = messageDraft.trim();
       if (!trimmed) return;
+      if (detail?.dialog.source === 'telegram') {
+        setSendError('Ответы отправляются в рабочем Telegram-чате. В портале отправка недоступна для этого источника.');
+        return;
+      }
       setSending(true);
       setSendError(null);
       try {
@@ -157,7 +161,7 @@ export default function DialogsPage() {
         setSending(false);
       }
     },
-    [messageDraft, selectedDialogId, loadDialogMessages],
+    [messageDraft, selectedDialogId, loadDialogMessages, detail],
   );
 
   const currentDialog = detail?.dialog;
@@ -185,6 +189,18 @@ export default function DialogsPage() {
           ) : (
             dialogs.map((dialog) => {
               const isActive = dialog.id === selectedDialogId;
+              const primaryLabel =
+                dialog.source === 'telegram'
+                  ? `Telegram • ${dialog.external_display_name || dialog.external_username || dialog.avito_dialog_id}`
+                  : `Avito #${dialog.avito_dialog_id}`;
+              const secondaryLabel =
+                dialog.source === 'telegram'
+                  ? dialog.external_username
+                    ? `@${dialog.external_username}`
+                    : dialog.external_reference
+                    ? `ID: ${dialog.external_reference}`
+                    : `Диалог #${dialog.id}`
+                  : `Диалог #${dialog.id}`;
               return (
                 <button
                   key={dialog.id}
@@ -197,10 +213,10 @@ export default function DialogsPage() {
                   )}
                 >
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>Avito #{dialog.avito_dialog_id}</span>
+                    <span>{primaryLabel}</span>
                     {dialog.last_message_at ? <span>{formatDate(dialog.last_message_at)}</span> : null}
                   </div>
-                  <div className="mt-2 text-sm font-medium text-foreground">Диалог #{dialog.id}</div>
+                  <div className="mt-2 text-sm font-medium text-foreground">{secondaryLabel}</div>
                   {dialog.telegram_topic_id ? (
                     <p className="mt-1 text-xs text-muted-foreground">ID топика: {dialog.telegram_topic_id}</p>
                   ) : null}
@@ -227,10 +243,26 @@ export default function DialogsPage() {
           <>
             <header className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/80 px-4 py-3 shadow-inner shadow-blue-100">
               <div>
-                <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Диалог</p>
-                <h2 className="text-lg font-semibold text-foreground">Avito #{currentDialog.avito_dialog_id}</h2>
+                <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">
+                  {currentDialog.source === 'telegram' ? 'Диалог из Telegram' : 'Диалог из Avito'}
+                </p>
+                <h2 className="text-lg font-semibold text-foreground">
+                  {currentDialog.source === 'telegram'
+                    ? `Telegram • ${currentDialog.external_display_name || currentDialog.external_username || currentDialog.avito_dialog_id}`
+                    : `Avito #${currentDialog.avito_dialog_id}`}
+                </h2>
                 <p className="text-xs text-muted-foreground">
-                  {currentDialog.telegram_topic_id ? `Топик Telegram: ${currentDialog.telegram_topic_id}` : 'Топик ещё не создан'}
+                  {currentDialog.source === 'telegram'
+                    ? [
+                        currentDialog.external_username ? `@${currentDialog.external_username}` : null,
+                        currentDialog.external_reference ? `ID: ${currentDialog.external_reference}` : null,
+                        currentDialog.telegram_topic_id ? `Топик: ${currentDialog.telegram_topic_id}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' • ') || 'Источник Telegram'
+                    : currentDialog.telegram_topic_id
+                    ? `Топик Telegram: ${currentDialog.telegram_topic_id}`
+                    : 'Топик ещё не создан'}
                 </p>
               </div>
               <Badge appearance="light" variant="secondary" size="sm">
@@ -250,7 +282,8 @@ export default function DialogsPage() {
               ) : (
                 <div className="space-y-3">
                   {sortedMessages.map((message) => {
-                    const isOutgoing = message.direction === 'telegram';
+                    const isOutgoing =
+                      message.direction === 'telegram' || message.direction === 'telegram_source_out';
                     const timestamp = formatDateTime(message.created_at);
                     const metaColor = isOutgoing ? 'text-primary-foreground/70' : 'text-slate-500';
                     const statusLabel = message.status?.toUpperCase();
@@ -297,18 +330,27 @@ export default function DialogsPage() {
                   <AlertDescription>{sendError}</AlertDescription>
                 </Alert>
               )}
+              {currentDialog.source === 'telegram' ? (
+                <Alert appearance="light" className="border-blue-200/70 bg-blue-50/70 text-blue-900">
+                  <AlertDescription>
+                    Ответы для этого источника отправляются напрямую из рабочего чата Telegram. Используйте соответствующий топик, чтобы продолжить переписку.
+                  </AlertDescription>
+                </Alert>
+              ) : null}
               <div className="flex items-end gap-3">
                 <Textarea
                   value={messageDraft}
                   onChange={(event) => setMessageDraft(event.target.value)}
-                  placeholder="Напишите ответ клиенту..."
+                  placeholder={currentDialog.source === 'telegram' ? 'Отправка доступна только из Telegram-чата' : 'Напишите ответ клиенту...'}
                   rows={3}
-                  disabled={sending}
+                  disabled={sending || currentDialog.source === 'telegram'}
                   className="flex-1 resize-none"
                 />
                 <Button
                   type="submit"
-                  disabled={sending || !messageDraft.trim()}
+                  disabled={
+                    sending || !messageDraft.trim() || currentDialog.source === 'telegram'
+                  }
                   variant="primary"
                   className="flex h-12 w-12 items-center justify-center rounded-full p-0 shadow-[0_18px_40px_-18px_rgba(59,130,246,0.7)] transition-transform hover:scale-105"
                   aria-label="Отправить сообщение"
@@ -328,17 +370,46 @@ export default function DialogsPage() {
         </p>
         <div className="mt-4 space-y-3 rounded-2xl bg-white/80 p-4 text-sm shadow-inner shadow-blue-100">
           <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Avito ID</span>
-            <span className="font-medium text-foreground">{currentDialog?.avito_dialog_id ?? '—'}</span>
+            <span className="text-muted-foreground">Источник</span>
+            <span className="font-medium text-foreground">
+              {currentDialog?.source === 'telegram' ? 'Telegram бот' : 'Avito аккаунт'}
+            </span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">Создан</span>
             <span className="font-medium text-foreground">{formatDate(currentDialog?.created_at)}</span>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Telegram чат</span>
-            <span className="font-medium text-foreground">{currentDialog?.telegram_chat_id ?? '—'}</span>
-          </div>
+          {currentDialog?.source === 'telegram' ? (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Пользователь</span>
+                <span className="font-medium text-foreground">
+                  {currentDialog.external_display_name || currentDialog.external_username || '—'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Username</span>
+                <span className="font-medium text-foreground">
+                  {currentDialog.external_username ? `@${currentDialog.external_username}` : '—'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Chat ID</span>
+                <span className="font-medium text-foreground">{currentDialog.external_reference ?? '—'}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Avito ID</span>
+                <span className="font-medium text-foreground">{currentDialog?.avito_dialog_id ?? '—'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Telegram чат</span>
+                <span className="font-medium text-foreground">{currentDialog?.telegram_chat_id ?? '—'}</span>
+              </div>
+            </>
+          )}
         </div>
         <div className="mt-6 space-y-3 rounded-2xl bg-gradient-to-br from-blue-500/10 via-indigo-400/5 to-white/60 p-4 text-sm text-muted-foreground shadow-inner shadow-blue-100">
           <p>

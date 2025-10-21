@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, ReactElement, cloneElement, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, ReactElement, cloneElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Accordion,
   AccordionHeader,
@@ -35,7 +35,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { apiFetch } from '@/lib/api';
-import type { AvitoAccount, Bot, Dialog, TelegramChat } from '../types';
+import type { AvitoAccount, Bot, Dialog, TelegramChat, TelegramSource } from '../types';
 import { Eye, EyeOff, Loader2, RefreshCcw, Trash2 } from 'lucide-react';
 
 const initialBotForm = {
@@ -47,6 +47,13 @@ const initialAvitoForm = {
   api_client_id: '',
   api_client_secret: '',
   bot_id: '',
+};
+
+const initialTelegramSourceForm = {
+  token: '',
+  bot_id: '',
+  display_name: '',
+  description: '',
 };
 
 const DEFAULT_AUTO_REPLY_START = '09:00';
@@ -115,9 +122,11 @@ export default function ClientSettingsPage() {
   const [bots, setBots] = useState<Bot[]>([]);
   const [accounts, setAccounts] = useState<AvitoAccount[]>([]);
   const [dialogs, setDialogs] = useState<Dialog[]>([]);
+  const [telegramSources, setTelegramSources] = useState<TelegramSource[]>([]);
 
   const [botForm, setBotForm] = useState(initialBotForm);
   const [avitoForm, setAvitoForm] = useState(initialAvitoForm);
+  const [telegramSourceForm, setTelegramSourceForm] = useState(initialTelegramSourceForm);
   const [filterText, setFilterText] = useState('');
   const [requireReply, setRequireReply] = useState(false);
   const [hideSystemMessages, setHideSystemMessages] = useState(true);
@@ -136,21 +145,25 @@ export default function ClientSettingsPage() {
   const [loading, setLoading] = useState(false);
   const [botSubmitting, setBotSubmitting] = useState(false);
   const [avitoSubmitting, setAvitoSubmitting] = useState(false);
+  const [telegramSourceSubmitting, setTelegramSourceSubmitting] = useState(false);
   const [filterSubmitting, setFilterSubmitting] = useState(false);
   const [autoReplySubmitting, setAutoReplySubmitting] = useState(false);
   const [timeTick, setTimeTick] = useState(() => Date.now());
 
   const [flash, setFlash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copiedSourceId, setCopiedSourceId] = useState<number | null>(null);
+  const copyTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [clientResp, botsResp, accountsResp, dialogsResp] = await Promise.all([
+      const [clientResp, botsResp, accountsResp, dialogsResp, telegramSourcesResp] = await Promise.all([
         apiFetch('/api/clients/me'),
         apiFetch('/api/bots/'),
         apiFetch('/api/avito/accounts'),
         apiFetch('/api/dialogs/'),
+        apiFetch('/api/telegram-sources'),
       ]);
       const botsData = botsResp as Bot[];
       setFilterText(clientResp.filter_keywords ?? '');
@@ -167,6 +180,7 @@ export default function ClientSettingsPage() {
       );
       setAutoReplyText(clientResp.auto_reply_text ?? '');
       setBots(botsData);
+      setTelegramSources(telegramSourcesResp as TelegramSource[]);
       setBotChats((prev) => {
         const allowed = new Set(botsData.map((bot) => bot.id));
         const next: Record<number, TelegramChat[]> = {};
@@ -211,7 +225,11 @@ export default function ClientSettingsPage() {
     };
   }, []);
 
-  const botOptions = useMemo(() => bots.map((bot) => ({ value: String(bot.id), label: bot.bot_username ?? `Bot #${bot.id}` })), [bots]);
+  const botOptions = useMemo(
+    () => bots.map((bot) => ({ value: String(bot.id), label: bot.bot_username ?? `Bot #${bot.id}` })),
+    [bots],
+  );
+  const botLookup = useMemo(() => new Map(bots.map((bot) => [bot.id, bot])), [bots]);
   const timeOptions = useMemo(() => {
     const result: string[] = [];
     for (let hour = 0; hour < 24; hour += 1) {
@@ -315,6 +333,80 @@ export default function ClientSettingsPage() {
       setAvitoSubmitting(false);
     }
   };
+
+  const handleTelegramSourceSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!telegramSourceForm.token.trim()) {
+      setError('Укажите токен Telegram-бота.');
+      return;
+    }
+    if (!telegramSourceForm.bot_id) {
+      setError('Выберите управляющего бота для обработки диалогов.');
+      return;
+    }
+    setTelegramSourceSubmitting(true);
+    setError(null);
+    setFlash(null);
+    try {
+      await apiFetch('/api/telegram-sources', {
+        method: 'POST',
+        body: JSON.stringify({
+          token: telegramSourceForm.token.trim(),
+          bot_id: Number(telegramSourceForm.bot_id),
+          display_name: telegramSourceForm.display_name.trim() || undefined,
+          description: telegramSourceForm.description.trim() || undefined,
+        }),
+      });
+      setTelegramSourceForm(initialTelegramSourceForm);
+      await load();
+      setFlash('Telegram-бот источника подключён.');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setTelegramSourceSubmitting(false);
+    }
+  };
+
+  const handleDeleteTelegramSource = async (sourceId: number) => {
+    setError(null);
+    setFlash(null);
+    try {
+      await apiFetch(`/api/telegram-sources/${sourceId}`, { method: 'DELETE' });
+      await load();
+      setFlash('Источник удалён.');
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const handleCopyWebhook = useCallback(
+    async (webhook: string, sourceId: number) => {
+      try {
+        await navigator.clipboard.writeText(webhook);
+        if (copyTimerRef.current) {
+          clearTimeout(copyTimerRef.current);
+          copyTimerRef.current = null;
+        }
+        setCopiedSourceId(sourceId);
+        copyTimerRef.current = setTimeout(() => {
+          setCopiedSourceId((prev) => (prev === sourceId ? null : prev));
+          copyTimerRef.current = null;
+        }, 2500);
+      } catch (err) {
+        setError('Не удалось скопировать ссылку вебхука. Скопируйте вручную.');
+      }
+    },
+    [],
+  );
+
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const handleFilterSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -878,6 +970,170 @@ export default function ClientSettingsPage() {
                 </Button>
               </div>
             </form>
+          </AccordionPanel>
+        </AccordionItem>
+
+        <AccordionItem value="telegram-sources" className="glass-panel rounded-2xl border border-[var(--app-border)]">
+          <AccordionHeader>
+            <AccordionTrigger>
+              <span className="text-base font-semibold">Источники — Telegram-боты</span>
+            </AccordionTrigger>
+          </AccordionHeader>
+          <AccordionPanel>
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_1fr]">
+              <form onSubmit={handleTelegramSourceSubmit} className="grid gap-4 rounded-2xl border border-dashed border-blue-200/60 bg-blue-50/40 p-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="telegram-source-token">Bot API token источника</Label>
+                  <Input
+                    id="telegram-source-token"
+                    placeholder="0000000000:ABCDEF..."
+                    value={telegramSourceForm.token}
+                    onChange={(event) => setTelegramSourceForm((prev) => ({ ...prev, token: event.target.value }))}
+                    required
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Управляющий бот</Label>
+                  <Select
+                    value={telegramSourceForm.bot_id}
+                    onValueChange={(value: string) => setTelegramSourceForm((prev) => ({ ...prev, bot_id: value ?? '' }))}
+                  >
+                    <SelectTrigger className="w-full justify-between">
+                      <SelectValue placeholder={bots.length === 0 ? 'Нет подключённых ботов' : 'Выберите бота'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {bots.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-muted-foreground">Сначала добавьте управляющего бота.</div>
+                      ) : (
+                        bots.map((bot) => (
+                          <SelectItem key={bot.id} value={String(bot.id)}>
+                            {bot.bot_username ?? `Bot #${bot.id}`}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="telegram-source-name">Название для команды (опционально)</Label>
+                  <Input
+                    id="telegram-source-name"
+                    placeholder="Телеграм витрина"
+                    value={telegramSourceForm.display_name}
+                    onChange={(event) => setTelegramSourceForm((prev) => ({ ...prev, display_name: event.target.value }))}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="telegram-source-description">Описание (опционально)</Label>
+                  <Textarea
+                    id="telegram-source-description"
+                    placeholder="Добавьте подсказку для коллег, зачем нужен этот бот."
+                    rows={3}
+                    value={telegramSourceForm.description}
+                    onChange={(event) => setTelegramSourceForm((prev) => ({ ...prev, description: event.target.value }))}
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <Button type="submit" disabled={telegramSourceSubmitting || bots.length === 0}>
+                    {telegramSourceSubmitting ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+                    Подключить источник
+                  </Button>
+                </div>
+              </form>
+
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Подключённые источники</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Каждый источник принимает входящие сообщения пользователей и создаёт темы в рабочем чате.
+                  </p>
+                </div>
+                {telegramSources.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-4 text-sm text-muted-foreground">
+                    Источники Telegram пока не добавлены. Подключите бота источника, чтобы принимать обращения из Telegram.
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white/80 shadow-sm">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Источник</TableHead>
+                          <TableHead>Управляющий бот</TableHead>
+                          <TableHead>Webhook</TableHead>
+                          <TableHead>Статус</TableHead>
+                          <TableHead className="w-16 text-right" />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {telegramSources.map((source) => {
+                          const linkedBot = botLookup.get(source.bot_id);
+                          return (
+                            <TableRow key={source.id}>
+                              <TableCell>
+                                <div className="flex flex-col">
+                                  <span className="font-medium text-foreground">
+                                    {source.display_name || source.bot_username || `Источник #${source.id}`}
+                                  </span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {source.bot_username ? `@${source.bot_username}` : 'username не задан'}
+                                  </span>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                {linkedBot ? linkedBot.bot_username ?? `Bot #${linkedBot.id}` : '—'}
+                              </TableCell>
+                              <TableCell>
+                                {source.webhook_url ? (
+                                  <div className="flex flex-col gap-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <Badge variant="success" appearance="light" size="xs">
+                                        Webhook активен
+                                      </Badge>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="text-xs"
+                                        onClick={() => void handleCopyWebhook(source.webhook_url!, source.id)}
+                                      >
+                                        {copiedSourceId === source.id ? 'Скопировано' : 'Скопировать ссылку'}
+                                      </Button>
+                                    </div>
+                                    <p className="text-[11px] text-muted-foreground">
+                                      Настройка выполнена автоматически, Telegram уже отправляет обновления.
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={source.status === 'active' ? 'success' : source.status === 'error' ? 'destructive' : 'secondary'} appearance="light" size="xs">
+                                  {source.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <ConfirmAction
+                                  title="Удалить источник?"
+                                  description="Диалоги и сообщения, связанные с источником, будут очищены. Продолжить?"
+                                  confirmLabel="Удалить"
+                                  onConfirm={() => handleDeleteTelegramSource(source.id)}
+                                >
+                                  <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive">
+                                    <Trash2 className="size-4" />
+                                  </Button>
+                                </ConfirmAction>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
+            </div>
           </AccordionPanel>
         </AccordionItem>
       </Accordion>
