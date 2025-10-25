@@ -16,6 +16,7 @@ class TelegramSource(TimestampedModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     client_id: int = Field(foreign_key="clients.id")
+    project_id: Optional[int] = Field(default=None, foreign_key="projects.id")
     bot_id: int = Field(foreign_key="bots.id")
     token: str = Field(nullable=False)
     bot_username: Optional[str] = Field(default=None)

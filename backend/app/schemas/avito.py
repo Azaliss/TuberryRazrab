@@ -17,6 +17,7 @@ class AvitoAccountResponse(BaseModel):
     status: AvitoAccountStatus
     token_expires_at: Optional[datetime]
     bot_id: Optional[int]
+    project_id: Optional[int]
     created_at: datetime
     monitoring_enabled: bool
     webhook_enabled: bool
@@ -32,6 +33,7 @@ class AvitoAccountCreateRequest(BaseModel):
     token_expires_at: datetime | None = None
     bot_id: int | None = None
     monitoring_enabled: bool | None = True
+    project_id: int | None = None
 
 
 class AvitoAccountUpdateRequest(BaseModel):
@@ -43,3 +45,4 @@ class AvitoAccountUpdateRequest(BaseModel):
     token_expires_at: datetime | None = None
     bot_id: int | None = None
     monitoring_enabled: bool | None = None
+    project_id: int | None = None

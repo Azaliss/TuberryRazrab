@@ -11,6 +11,7 @@ class TelegramSourceResponse(BaseModel):
     id: int
     client_id: int
     bot_id: int
+    project_id: Optional[int]
     display_name: Optional[str]
     bot_username: Optional[str]
     status: TelegramSourceStatus
@@ -22,12 +23,14 @@ class TelegramSourceResponse(BaseModel):
 class TelegramSourceCreateRequest(BaseModel):
     token: str
     bot_id: int
+    project_id: int
     display_name: Optional[str] = None
     description: Optional[str] = None
 
 
 class TelegramSourceUpdateRequest(BaseModel):
     bot_id: Optional[int] = None
+    project_id: Optional[int] = None
     display_name: Optional[str] = None
     description: Optional[str] = None
     status: Optional[TelegramSourceStatus] = None

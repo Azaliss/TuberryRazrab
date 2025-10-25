@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bot import Bot
 from app.models.dialog import Dialog
+from app.models.project import Project
 from app.models.enums import BotStatus, DialogSource, MessageDirection, MessageStatus
 from app.db.session import SessionLocal
 from app.repositories.avito_repository import AvitoAccountRepository
@@ -21,6 +22,7 @@ from app.repositories.bot_repository import BotRepository
 from app.repositories.dialog_repository import DialogRepository
 from app.repositories.message_repository import MessageRepository
 from app.repositories.client_repository import ClientRepository
+from app.repositories.project_repository import ProjectRepository
 from app.services.avito import AvitoService
 from app.services.telegram import TelegramService
 from app.services.queue import TaskQueue
@@ -35,6 +37,7 @@ AUTO_REPLY_DELAY_SECONDS = 75
 class DialogContext:
     bot: Bot
     dialog: Dialog
+    project: Optional[Project]
     tg: TelegramService
     telegram_chat_id: Optional[str]
     telegram_topic_id: Optional[str]
@@ -56,7 +59,81 @@ class DialogService:
         self.bot_repo = BotRepository(session)
         self.avito_repo = AvitoAccountRepository(session)
         self.client_repo = ClientRepository(session)
+        self.project_repo = ProjectRepository(session)
         self.avito_service = AvitoService()
+
+    async def _resolve_project_for_avito_account(self, account: Any, *, client_id: int) -> Project | None:
+        project: Project | None = None
+        account_project_id = getattr(account, "project_id", None)
+        if account_project_id:
+            project = await self.project_repo.get(account_project_id)
+            if project and project.client_id != client_id:
+                logger.warning(
+                    "Project %s does not belong to client %s (account %s)",
+                    project.id,
+                    client_id,
+                    account.id,
+                )
+                project = None
+
+        if project is None and getattr(account, "bot_id", None):
+            project = await self.project_repo.get_by_bot_id(account.bot_id)
+            if project and project.client_id != client_id:
+                logger.warning(
+                    "Bot %s linked project %s does not belong to client %s",
+                    account.bot_id,
+                    project.id,
+                    client_id,
+                )
+                project = None
+
+        if project is not None and account.project_id != project.id:
+            try:
+                await self.avito_repo.update(account, project_id=project.id)
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to sync project_id for Avito account %s", account.id)
+
+        return project
+
+    async def _ensure_project_bot_link(self, project: Project, *, bot_id: int) -> Project:
+        if project.bot_id is None:
+            try:
+                project = await self.project_repo.update(project, bot_id=bot_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to attach bot %s to project %s", bot_id, project.id)
+        elif project.bot_id != bot_id:
+            logger.warning(
+                "Project %s already linked to bot %s, incoming bot %s",
+                project.id,
+                project.bot_id,
+                bot_id,
+            )
+        return project
+
+    async def _attach_project_to_dialog(self, dialog: Dialog, project: Project | None) -> Dialog:
+        if project is None:
+            return dialog
+        if dialog.project_id == project.id:
+            return dialog
+        dialog.project_id = project.id
+        dialog.updated_at = datetime.utcnow()
+        await self.session.commit()
+        await self.session.refresh(dialog)
+        return dialog
+
+    async def _resolve_project_for_dialog(self, dialog: Dialog, *, bot: Bot | None = None) -> tuple[Dialog, Project | None]:
+        project: Project | None = None
+        if dialog.project_id:
+            project = await self.project_repo.get(dialog.project_id)
+        if project is None and bot is not None:
+            project = await self.project_repo.get_by_bot_id(bot.id)
+        if project is None and dialog.avito_account_id:
+            account = await self.avito_repo.get(dialog.avito_account_id)
+            if account and account.client_id == dialog.client_id:
+                project = await self._resolve_project_for_avito_account(account, client_id=dialog.client_id)
+        if project is not None:
+            dialog = await self._attach_project_to_dialog(dialog, project)
+        return dialog, project
 
     async def handle_avito_message(
         self,
@@ -74,10 +151,20 @@ class DialogService:
         text_value = message_text or ""
         normalized_attachments = list(attachments or [])
 
-        client = await self.client_repo.get_by_id(client_id)
+        avito_account = await self.avito_repo.get(avito_account_id)
+        if avito_account is None or avito_account.client_id != client_id:
+            raise ValueError("Avito account not found")
+
+        project = await self._resolve_project_for_avito_account(avito_account, client_id=client_id)
+        client = None if project is not None else await self.client_repo.get_by_id(client_id)
 
         if text_value:
-            if await self._should_ignore_message(client_id=client_id, message_text=text_value, client=client):
+            if await self._should_ignore_message(
+                client_id=client_id,
+                message_text=text_value,
+                project=project,
+                client=client,
+            ):
                 logger.info("Ignoring Avito message for client %s due to filter", client_id)
                 return {"ignored": True, "reason": "filtered"}
 
@@ -99,10 +186,11 @@ class DialogService:
 
         context = await self._ensure_dialog_context(
             client_id=client_id,
-            avito_account_id=avito_account_id,
+            avito_account=avito_account,
             avito_dialog_id=avito_dialog_id,
             sender=sender,
             item_title=item_title,
+            project=project,
             client=client,
         )
         dialog = context.dialog
@@ -370,7 +458,7 @@ class DialogService:
         )
 
         auto_reply_dialog = await self._maybe_send_auto_reply(
-            client=client,
+            project=context.project,
             context=context,
             dialog=context.dialog,
             now_utc=datetime.utcnow(),
@@ -402,14 +490,20 @@ class DialogService:
         if existing:
             return {"ignored": True, "reason": "duplicate"}
 
-        client = await self.client_repo.get_by_id(client_id)
+        avito_account = await self.avito_repo.get(avito_account_id)
+        if avito_account is None or avito_account.client_id != client_id:
+            raise ValueError("Avito account not found")
+
+        project = await self._resolve_project_for_avito_account(avito_account, client_id=client_id)
+        client = None if project is not None else await self.client_repo.get_by_id(client_id)
 
         context = await self._ensure_dialog_context(
             client_id=client_id,
-            avito_account_id=avito_account_id,
+            avito_account=avito_account,
             avito_dialog_id=avito_dialog_id,
             sender=sender,
             item_title=item_title,
+            project=project,
             client=client,
         )
 
@@ -444,7 +538,7 @@ class DialogService:
         )
 
         auto_reply_dialog = await self._maybe_send_auto_reply(
-            client=client,
+            project=context.project,
             context=context,
             dialog=context.dialog,
             now_utc=datetime.utcnow(),
@@ -458,21 +552,29 @@ class DialogService:
         self,
         *,
         client_id: int,
-        avito_account_id: int,
+        avito_account: Any,
         avito_dialog_id: str,
         sender: Optional[str],
         item_title: Optional[str],
+        project: Project | None,
         client=None,
     ) -> DialogContext:
-        avito_account = await self.avito_repo.get(avito_account_id)
-        if avito_account is None or avito_account.client_id != client_id:
-            raise ValueError("Avito account not found")
-        if avito_account.bot_id is None:
-            raise ValueError("Avito account not linked to bot")
+        bot_id = None
+        if project is not None:
+            bot_id = getattr(project, "bot_id", None)
+        if bot_id is None:
+            bot_id = getattr(avito_account, "bot_id", None)
+        if bot_id is None:
+            raise ValueError("Bot not linked to project or avito account")
 
-        bot = await self.bot_repo.get(avito_account.bot_id)
+        bot = await self.bot_repo.get(bot_id)
         if bot is None:
             raise ValueError("Bot not found")
+
+        if project is not None:
+            project = await self._ensure_project_bot_link(project, bot_id=bot.id)
+        else:
+            project = await self.project_repo.get_by_bot_id(bot.id)
 
         tg = TelegramService(bot.token)
 
@@ -496,7 +598,7 @@ class DialogService:
         topic_created = False
         created_flag = False
 
-        if client is None:
+        if client is None and project is None:
             client = await self.client_repo.get_by_id(client_id)
 
         if dialog is None:
@@ -512,9 +614,10 @@ class DialogService:
                 )
             dialog = await self.dialog_repo.create(
                 client_id=client_id,
+                project_id=project.id if project is not None else getattr(avito_account, "project_id", None),
                 bot_id=bot.id,
                 avito_dialog_id=avito_dialog_id,
-                avito_account_id=avito_account_id,
+                avito_account_id=getattr(avito_account, "id", None),
                 source=DialogSource.avito,
                 telegram_chat_id=telegram_chat_id,
                 telegram_topic_id=str(topic_id) if topic_id else None,
@@ -543,6 +646,8 @@ class DialogService:
                     dialog = await self.dialog_repo.set_topic(dialog, str(topic_id))
                     telegram_topic_id = dialog.telegram_topic_id
                     topic_created = True
+        else:
+            dialog = await self._attach_project_to_dialog(dialog, project)
 
         dialog_topic_intro_sent = bool(getattr(dialog, "topic_intro_sent", False))
 
@@ -585,6 +690,7 @@ class DialogService:
         return DialogContext(
             bot=bot,
             dialog=dialog,
+            project=project,
             tg=tg,
             telegram_chat_id=telegram_chat_id,
             telegram_topic_id=telegram_topic_id,
@@ -603,18 +709,31 @@ class DialogService:
         *,
         client_id: int,
         message_text: str | None,
+        project=None,
         client=None,
     ) -> bool:
         if not message_text:
             return False
-        if client is None:
+        if project is None and client is None:
             client = await self.client_repo.get_by_id(client_id)
-        if client and getattr(client, "hide_system_messages", True):
+        hide_system = True
+        if project is not None:
+            hide_system = getattr(project, "hide_system_messages", True)
+        elif client is not None:
+            hide_system = getattr(client, "hide_system_messages", True)
+
+        if hide_system:
             if "[Системное сообщение]" in message_text:
                 logger.info("Ignoring Avito message for client %s due to system marker", client_id)
                 return True
 
-        filters = self._extract_filter_tokens(client.filter_keywords if client else None)
+        keywords = None
+        if project is not None:
+            keywords = getattr(project, "filter_keywords", None)
+        elif client is not None:
+            keywords = getattr(client, "filter_keywords", None)
+
+        filters = self._extract_filter_tokens(keywords)
         if not filters:
             return False
         lowered = message_text.lower()
@@ -1186,26 +1305,26 @@ class DialogService:
     async def _maybe_send_auto_reply(
         self,
         *,
-        client,
+        project: Project | None,
         context: DialogContext,
         dialog: Dialog,
         now_utc: datetime,
     ) -> Dialog | None:
-        if client is None or not getattr(client, "auto_reply_enabled", False):
+        if project is None or not getattr(project, "auto_reply_enabled", False):
             return None
 
-        text_source = getattr(client, "auto_reply_text", None) or ""
+        text_source = getattr(project, "auto_reply_text", None) or ""
         text_value = text_source.strip()
         if not text_value:
             return None
 
-        timezone_name = getattr(client, "auto_reply_timezone", None)
+        timezone_name = getattr(project, "auto_reply_timezone", None)
         tzinfo = self._resolve_timezone(timezone_name)
         local_now = now_utc.astimezone(tzinfo)
 
-        auto_reply_always = bool(getattr(client, "auto_reply_always", False))
-        start_time: time | None = getattr(client, "auto_reply_start_time", None)
-        end_time: time | None = getattr(client, "auto_reply_end_time", None)
+        auto_reply_always = bool(getattr(project, "auto_reply_always", False))
+        start_time: time | None = getattr(project, "auto_reply_start_time", None)
+        end_time: time | None = getattr(project, "auto_reply_end_time", None)
 
         if not auto_reply_always:
             if start_time is None or end_time is None:
@@ -1274,12 +1393,23 @@ class DialogService:
         if stored_schedule is None or stored_schedule != scheduled_at:
             return
 
-        client = await self.client_repo.get_by_id(dialog.client_id)
-        if client is None or not getattr(client, "auto_reply_enabled", False):
+        project: Project | None = None
+        avito_account = None
+        if dialog.project_id:
+            project = await self.project_repo.get(dialog.project_id)
+        if (project is None or project.client_id != dialog.client_id) and dialog.avito_account_id:
+            avito_account = await self.avito_repo.get(dialog.avito_account_id)
+            if avito_account and avito_account.client_id == dialog.client_id:
+                project = await self._resolve_project_for_avito_account(avito_account, client_id=dialog.client_id)
+
+        if project is None:
+            project = None
+
+        if project is None or not getattr(project, "auto_reply_enabled", False):
             await self.dialog_repo.clear_auto_reply_schedule(dialog)
             return
 
-        text_source = getattr(client, "auto_reply_text", None) or ""
+        text_source = getattr(project, "auto_reply_text", None) or ""
         text_value = text_source.strip()
         if not text_value:
             await self.dialog_repo.clear_auto_reply_schedule(dialog)
@@ -1289,12 +1419,12 @@ class DialogService:
             await self.dialog_repo.clear_auto_reply_schedule(dialog)
             return
 
-        tzinfo = self._resolve_timezone(getattr(client, "auto_reply_timezone", None))
+        tzinfo = self._resolve_timezone(getattr(project, "auto_reply_timezone", None))
         local_now = datetime.now(tzinfo)
 
-        auto_reply_always = bool(getattr(client, "auto_reply_always", False))
-        start_time: time | None = getattr(client, "auto_reply_start_time", None)
-        end_time: time | None = getattr(client, "auto_reply_end_time", None)
+        auto_reply_always = bool(getattr(project, "auto_reply_always", False))
+        start_time: time | None = getattr(project, "auto_reply_start_time", None)
+        end_time: time | None = getattr(project, "auto_reply_end_time", None)
 
         if not auto_reply_always:
             if start_time is None or end_time is None:
@@ -1316,13 +1446,17 @@ class DialogService:
                 await self.dialog_repo.clear_auto_reply_schedule(dialog)
                 return
 
+        if avito_account is None and dialog.avito_account_id:
+            avito_account = await self.avito_repo.get(dialog.avito_account_id)
+
         context = await self._ensure_dialog_context(
             client_id=dialog.client_id,
-            avito_account_id=dialog.avito_account_id,
+            avito_account=avito_account,
             avito_dialog_id=dialog.avito_dialog_id,
             sender=None,
             item_title=None,
-            client=client,
+            project=project,
+            client=None,
         )
 
         telegram_text = f"🤖 Автоответчик: {text_value}"
@@ -1391,6 +1525,7 @@ class DialogService:
                 "telegram_topic_id": dialog.telegram_topic_id,
                 "status_on_success": "auto",
                 "topic_item_title": context.item_title,
+                "project_id": context.project.id if context.project is not None else dialog.project_id,
             },
         )
 
@@ -1572,25 +1707,27 @@ class DialogService:
             raise ValueError("Empty Telegram payload")
 
         dialog = None
-        if message_thread_id:
-            dialog = await self.dialog_repo.get_by_topic(bot.id, message_thread_id)
+        normalized_thread_id = None
+        if message_thread_id not in (None, 0, "0"):
+            normalized_thread_id = str(message_thread_id)
+        message_thread_id = normalized_thread_id
+        if normalized_thread_id:
+            dialog = await self.dialog_repo.get_by_topic(bot.id, normalized_thread_id)
         if dialog is None and source_message is not None:
             dialog = await self.dialog_repo.get(source_message.dialog_id)
             if dialog and message_thread_id is None and dialog.telegram_topic_id:
                 message_thread_id = dialog.telegram_topic_id
         if dialog is None and message_thread_id is None:
-            dialog = await self.dialog_repo.get_recent_by_chat(bot.id, chat_id)
-            if dialog and dialog.telegram_topic_id and dialog.telegram_topic_id != message_thread_id:
-                # align implicit topic for downstream logging/diagnostics
+            dialog = await self.dialog_repo.get_recent_by_chat(bot.id, chat_id, source=DialogSource.telegram)
+            if dialog and dialog.telegram_topic_id:
                 message_thread_id = dialog.telegram_topic_id
 
         if dialog is None:
             raise ValueError("Dialog not found for message")
 
-        if message_thread_id and (dialog.telegram_topic_id is None or dialog.telegram_topic_id != message_thread_id):
-            thread_id_str = str(message_thread_id)
-            dialog = await self.dialog_repo.set_topic(dialog, thread_id_str)
-            telegram_topic_id = thread_id_str
+        if normalized_thread_id and (dialog.telegram_topic_id is None or dialog.telegram_topic_id != normalized_thread_id):
+            dialog = await self.dialog_repo.set_topic(dialog, normalized_thread_id)
+            telegram_topic_id = normalized_thread_id
         else:
             telegram_topic_id = dialog.telegram_topic_id
 
@@ -1605,8 +1742,9 @@ class DialogService:
                 message_id=message_id,
             )
 
-        client = await self.client_repo.get_by_id(dialog.client_id)
-        require_reply = bool(getattr(client, "require_reply_for_avito", False)) if client else False
+        dialog, project = await self._resolve_project_for_dialog(dialog, bot=bot)
+
+        require_reply = False
 
         reply_payload = telegram_message.get("reply_to_message") if isinstance(telegram_message.get("reply_to_message"), dict) else None
         reply_text = ""
@@ -1625,7 +1763,7 @@ class DialogService:
         if quoted_client_message and has_client_marker and source_message and not source_message.is_client_message:
             source_message = await self.message_repo.mark_as_client_message(source_message)
 
-        should_enqueue = not require_reply or (quoted_client_message and has_client_marker)
+        should_enqueue = True
 
         attachment_records: list[dict[str, Any]] = attachments if attachments else []
         for attachment in attachment_records:
@@ -1670,6 +1808,7 @@ class DialogService:
                     "telegram_topic_id": telegram_topic_id,
                     "status_on_success": "outgoing",
                     "topic_item_title": item_title,
+                    "project_id": project.id if project is not None else dialog.project_id,
                 },
             )
             enqueue_results.append({"kind": "text"})
@@ -1699,6 +1838,7 @@ class DialogService:
                             "telegram_topic_id": telegram_topic_id,
                             "status_on_success": "outgoing",
                             "topic_item_title": item_title,
+                            "project_id": project.id if project is not None else dialog.project_id,
                         },
                     )
                     enqueue_results.append({"kind": "image", "file_id": attachment.get("file_id")})
@@ -1742,8 +1882,12 @@ class DialogService:
         if not target_chat_id:
             raise ValueError("Для диалога не настроен чат Telegram")
 
-        client = await self.client_repo.get_by_id(dialog.client_id)
-        require_reply = bool(getattr(client, "require_reply_for_avito", False)) if client else False
+        dialog, project = await self._resolve_project_for_dialog(dialog, bot=bot)
+        if project is not None:
+            require_reply = bool(getattr(project, "require_reply_for_sources", False))
+        else:
+            client = await self.client_repo.get_by_id(dialog.client_id)
+            require_reply = bool(getattr(client, "require_reply_for_avito", False)) if client else False
         if require_reply:
             raise ValueError("Для отправки сообщений требуется отвечать в Telegram с цитированием")
 
@@ -1803,6 +1947,7 @@ class DialogService:
                 "telegram_topic_id": dialog.telegram_topic_id,
                 "status_on_success": "outgoing",
                 "topic_item_title": item_title,
+                "project_id": project.id if project is not None else dialog.project_id,
             },
         )
 

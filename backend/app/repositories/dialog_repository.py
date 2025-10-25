@@ -22,9 +22,16 @@ class DialogRepository:
         return result.scalar_one_or_none()
 
     async def get_by_topic(self, bot_id: int, topic_id: str) -> Dialog | None:
-        result = await self.session.execute(
-            select(Dialog).where(Dialog.bot_id == bot_id, Dialog.telegram_topic_id == topic_id)
+        stmt = (
+            select(Dialog)
+            .where(Dialog.bot_id == bot_id, Dialog.telegram_topic_id == topic_id)
+            .order_by(
+                (Dialog.source == DialogSource.telegram.value).desc(),
+                Dialog.updated_at.desc(),
+            )
+            .limit(1)
         )
+        result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def list_for_client(self, client_id: int) -> list[Dialog]:
@@ -58,19 +65,30 @@ class DialogRepository:
         result = await self.session.execute(select(Dialog).where(Dialog.bot_id == bot_id))
         return list(result.scalars().all())
 
-    async def get_recent_by_chat(self, bot_id: int, chat_id: str) -> Dialog | None:
-        result = await self.session.execute(
+    async def get_recent_by_chat(
+        self,
+        bot_id: int,
+        chat_id: str,
+        *,
+        source: DialogSource | None = None,
+    ) -> Dialog | None:
+        stmt = (
             select(Dialog)
             .where(Dialog.bot_id == bot_id, Dialog.telegram_chat_id == chat_id)
             .order_by(Dialog.last_message_at.desc())
             .limit(1)
         )
+        if source is not None:
+            stmt = stmt.where(Dialog.source == (source.value if isinstance(source, DialogSource) else source))
+
+        result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def create(
         self,
         *,
         client_id: int,
+        project_id: int | None,
         bot_id: int,
         avito_dialog_id: str,
         avito_account_id: int | None = None,
@@ -84,6 +102,7 @@ class DialogRepository:
     ) -> Dialog:
         dialog = Dialog(
             client_id=client_id,
+            project_id=project_id,
             avito_account_id=avito_account_id,
             source=source.value if isinstance(source, DialogSource) else source,
             telegram_source_id=telegram_source_id,
@@ -161,6 +180,18 @@ class DialogRepository:
         await self.session.execute(
             update(Dialog)
             .where(Dialog.client_id == client_id)
+            .values(
+                auto_reply_last_sent_at=None,
+                auto_reply_scheduled_at=None,
+                updated_at=datetime.utcnow(),
+            )
+        )
+        await self.session.commit()
+
+    async def reset_auto_reply_marks_for_project(self, project_id: int) -> None:
+        await self.session.execute(
+            update(Dialog)
+            .where(Dialog.project_id == project_id)
             .values(
                 auto_reply_last_sent_at=None,
                 auto_reply_scheduled_at=None,

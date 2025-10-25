@@ -2,6 +2,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from loguru import logger
 
 from app.api import deps
 from app.core.config import settings
@@ -10,6 +11,7 @@ from app.repositories.bot_repository import BotRepository
 from app.repositories.dialog_repository import DialogRepository
 from app.repositories.message_repository import MessageRepository
 from app.repositories.telegram_source_repository import TelegramSourceRepository
+from app.repositories.project_repository import ProjectRepository
 from app.schemas.telegram_source import (
     TelegramSourceCreateRequest,
     TelegramSourceResponse,
@@ -30,13 +32,20 @@ def _build_response(source, service: TelegramSourceService) -> TelegramSourceRes
 @router.get("", response_model=list[TelegramSourceResponse])
 @router.get("/", response_model=list[TelegramSourceResponse], include_in_schema=False)
 async def list_telegram_sources(
+    project_id: int | None = None,
     session: AsyncSession = Depends(deps.get_db),
     user=Depends(deps.get_current_user),
 ):
     if user.client_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User not attached to client")
     service = TelegramSourceService(session)
-    sources = await service.source_repo.list_for_client(user.client_id)
+    if project_id is not None:
+        project = await ProjectRepository(session).get(project_id)
+        if project is None or project.client_id != user.client_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Проект не найден")
+        sources = await service.source_repo.list_for_project(project_id)
+    else:
+        sources = await service.source_repo.list_for_client(user.client_id)
     return [_build_response(source, service) for source in sources]
 
 
@@ -52,12 +61,23 @@ async def create_telegram_source(
     if user.role not in (UserRole.owner, UserRole.admin):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
 
+    project_repo = ProjectRepository(session)
+    project = await project_repo.get(payload.project_id)
+    if project is None or project.client_id != user.client_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Проект не найден")
+
     bot_repo = BotRepository(session)
     controller_bot = await bot_repo.get(payload.bot_id)
     if controller_bot is None or controller_bot.client_id != user.client_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Управляющий бот не найден")
     if not controller_bot.group_chat_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Для управляющего бота не настроен рабочий чат")
+
+    if project.bot_id is None or project.bot_id != controller_bot.id:
+        try:
+            project = await project_repo.update(project, bot_id=controller_bot.id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to bind bot %s to project %s: %s", controller_bot.id, project.id, exc)
 
     if not settings.webhook_base_url:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="WEBHOOK_BASE_URL не настроен в конфигурации")
@@ -87,10 +107,12 @@ async def create_telegram_source(
             display_name=display_name,
             description=payload.description,
             bot_username=username,
+            project_id=project.id,
         )
     else:
         source = await repo.create(
             client_id=user.client_id,
+            project_id=project.id,
             bot_id=payload.bot_id,
             token=payload.token,
             bot_username=username,
@@ -124,6 +146,17 @@ async def update_telegram_source(
 
     updates: dict[str, Any] = {}
 
+    project_repo = ProjectRepository(session)
+    project = None
+    if source.project_id:
+        project = await project_repo.get(source.project_id)
+
+    if payload.project_id is not None and payload.project_id != source.project_id:
+        project = await project_repo.get(payload.project_id)
+        if project is None or project.client_id != user.client_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Проект не найден")
+        updates["project_id"] = project.id
+
     if payload.bot_id is not None and payload.bot_id != source.bot_id:
         bot = await BotRepository(session).get(payload.bot_id)
         if bot is None or bot.client_id != user.client_id:
@@ -131,6 +164,11 @@ async def update_telegram_source(
         if not bot.group_chat_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Для управляющего бота не настроен рабочий чат")
         updates["bot_id"] = payload.bot_id
+        if project and (project.bot_id is None or project.bot_id != bot.id):
+            try:
+                await project_repo.update(project, bot_id=bot.id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to bind bot %s to project %s: %s", bot.id, project.id, exc)
 
     if payload.display_name is not None:
         updates["display_name"] = payload.display_name

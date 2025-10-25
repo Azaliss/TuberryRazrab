@@ -5,6 +5,7 @@ from app.repositories.avito_repository import AvitoAccountRepository
 from app.repositories.dialog_repository import DialogRepository
 from app.repositories.message_repository import MessageRepository
 from app.repositories.project_settings_repository import ProjectSettingsRepository
+from app.repositories.project_repository import ProjectRepository
 from app.repositories.telegram_chat_repository import TelegramChatRepository
 from app.repositories.telegram_source_repository import TelegramSourceRepository
 
@@ -16,6 +17,7 @@ __all__ = [
     "DialogRepository",
     "MessageRepository",
     "ProjectSettingsRepository",
+    "ProjectRepository",
     "TelegramChatRepository",
     "TelegramSourceRepository",
 ]

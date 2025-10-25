@@ -16,6 +16,7 @@ from app.schemas.telegram_source import (
     TelegramSourceResponse,
     TelegramSourceUpdateRequest,
 )
+from app.schemas.project import ProjectCreateRequest, ProjectResponse, ProjectUpdateRequest
 
 __all__ = [
     "BootstrapAdminRequest",
@@ -36,6 +37,9 @@ __all__ = [
     "AvitoAccountUpdateRequest",
     "DialogMessagesResponse",
     "DialogResponse",
+    "ProjectCreateRequest",
+    "ProjectResponse",
+    "ProjectUpdateRequest",
     "TelegramSourceCreateRequest",
     "TelegramSourceResponse",
     "TelegramSourceUpdateRequest",

@@ -342,6 +342,77 @@ class AvitoService:
         await repo.set_webhook_status(account, enabled=True, url=target_url, last_error=None)
         return {"url": target_url, "response": response_json}
 
+    async def disable_webhook_for_account(
+        self,
+        account: AvitoAccount,
+        repo: AvitoAccountRepository,
+    ) -> None:
+        target_url = account.webhook_url or (
+            self.compose_webhook_url(account.id, account.webhook_secret) if account.webhook_secret else None
+        )
+
+        try:
+            access_token = await self._ensure_access_token(account, repo)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to obtain Avito access token before webhook removal",
+                account_id=account.id,
+                error=str(exc),
+            )
+            await repo.set_webhook_status(account, enabled=False, url=None, last_error=str(exc))
+            return
+
+        endpoints = [
+            "/messenger/v3/webhook",
+            "/messenger/v1/webhook",
+            "/messenger/v1/webhooks",
+        ]
+
+        last_error: str | None = None
+        success = False
+
+        async with httpx.AsyncClient(base_url=settings.avito_api_base, timeout=15.0) as client:
+            for endpoint in endpoints:
+                try:
+                    response = await client.delete(
+                        endpoint,
+                        json={"url": target_url} if target_url else None,
+                        headers=self._build_headers(access_token),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Exception while calling Avito webhook removal endpoint",
+                        account_id=account.id,
+                        endpoint=endpoint,
+                        error=str(exc),
+                    )
+                    last_error = str(exc)
+                    continue
+
+                if response.status_code in (200, 202, 204, 404, 410):
+                    success = True
+                    break
+
+                if response.status_code >= 500:
+                    last_error = f"HTTP {response.status_code}"
+                    continue
+
+                try:
+                    payload = response.json()
+                except Exception:  # noqa: BLE001
+                    payload = response.text
+
+                last_error = str(payload)
+                logger.warning(
+                    "Unexpected response when removing Avito webhook",
+                    account_id=account.id,
+                    endpoint=endpoint,
+                    status=response.status_code,
+                    error=last_error,
+                )
+
+        await repo.set_webhook_status(account, enabled=False, url=None, last_error=None if success else last_error)
+
     @asynccontextmanager
     async def _account_context(
         self, account_id: int

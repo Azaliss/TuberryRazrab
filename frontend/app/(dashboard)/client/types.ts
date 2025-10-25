@@ -13,6 +13,32 @@ export interface AvitoAccount {
   status: string;
   bot_id?: number;
   monitoring_enabled: boolean;
+  project_id?: number;
+}
+
+export type AutoReplyMode = 'always' | 'first';
+
+export interface Project {
+  id: number;
+  client_id: number;
+  name: string;
+  slug?: string;
+  description?: string;
+  status: string;
+  bot_id?: number;
+  filter_keywords?: string;
+  require_reply_for_sources: boolean;
+  hide_system_messages: boolean;
+  auto_reply_enabled: boolean;
+  auto_reply_mode: AutoReplyMode;
+  auto_reply_always: boolean;
+  auto_reply_start_time?: string;
+  auto_reply_end_time?: string;
+  auto_reply_timezone?: string;
+  auto_reply_text?: string;
+  topic_intro_template?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Dialog {
@@ -28,6 +54,7 @@ export interface Dialog {
   external_reference?: string;
   external_display_name?: string;
   external_username?: string;
+  project_id?: number;
 }
 
 export interface ClientProfile {
@@ -70,6 +97,7 @@ export interface TelegramSource {
   webhook_secret?: string;
   webhook_url?: string;
   description?: string;
+  project_id?: number;
 }
 
 export interface DialogDetail {

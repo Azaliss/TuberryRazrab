@@ -16,6 +16,7 @@ class AvitoAccount(TimestampedModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     client_id: int = Field(foreign_key="clients.id")
+    project_id: Optional[int] = Field(default=None, foreign_key="projects.id")
     name: Optional[str] = None
     api_client_id: Optional[str] = None
     api_client_secret: Optional[str] = None

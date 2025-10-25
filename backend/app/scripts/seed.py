@@ -3,6 +3,7 @@ import asyncio
 from app.core.config import settings
 from app.db.session import SessionLocal, init_db
 from app.repositories.client_repository import ClientRepository
+from app.repositories.project_repository import ProjectRepository
 from app.repositories.user_repository import UserRepository
 from app.services.auth import AuthService
 from app.models.enums import UserRole
@@ -26,6 +27,8 @@ async def seed() -> None:
             print("Создан клиент Demo")
         user_repo = UserRepository(session)
         existing = await user_repo.get_by_email("owner@demo.local")
+        project_repo = ProjectRepository(session)
+
         if existing is None:
             user = User(
                 email="owner@demo.local",
@@ -37,6 +40,20 @@ async def seed() -> None:
             print("Создан владелец Demo")
         else:
             print("Пользователь owner@demo.local уже существует")
+
+        projects = await project_repo.list_for_client(client.id)
+        if not projects:
+            project = await project_repo.create(
+                client_id=client.id,
+                name="Demo Project",
+                description="Стартовый проект для демонстрации возможностей Tuberry",
+                status="active",
+                require_reply_for_sources=False,
+                hide_system_messages=True,
+            )
+            print(f"Создан проект {project.name}")
+        else:
+            print("У клиента Demo уже есть проекты")
 
         tester_login = "tester5765053@tuberry.local"
         tester_password = "Tuberry5765!"

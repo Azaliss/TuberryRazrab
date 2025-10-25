@@ -16,6 +16,10 @@ class TelegramSourceRepository:
         result = await self.session.execute(select(TelegramSource).where(TelegramSource.client_id == client_id))
         return list(result.scalars().all())
 
+    async def list_for_project(self, project_id: int) -> list[TelegramSource]:
+        result = await self.session.execute(select(TelegramSource).where(TelegramSource.project_id == project_id))
+        return list(result.scalars().all())
+
     async def get(self, source_id: int) -> TelegramSource | None:
         result = await self.session.execute(select(TelegramSource).where(TelegramSource.id == source_id))
         return result.scalar_one_or_none()
@@ -28,6 +32,7 @@ class TelegramSourceRepository:
         self,
         *,
         client_id: int,
+        project_id: Optional[int],
         bot_id: int,
         token: str,
         bot_username: Optional[str] = None,
@@ -36,6 +41,7 @@ class TelegramSourceRepository:
     ) -> TelegramSource:
         source = TelegramSource(
             client_id=client_id,
+            project_id=project_id,
             bot_id=bot_id,
             token=token,
             bot_username=bot_username,

@@ -19,9 +19,14 @@ class AvitoAccountRepository:
         result = await self.session.execute(select(AvitoAccount).where(AvitoAccount.id == account_id))
         return result.scalar_one_or_none()
 
+    async def list_for_project(self, project_id: int) -> list[AvitoAccount]:
+        result = await self.session.execute(select(AvitoAccount).where(AvitoAccount.project_id == project_id))
+        return list(result.scalars().all())
+
     async def create(
         self,
         client_id: int,
+        project_id: int | None,
         api_client_id: str,
         api_client_secret: str,
         name: str | None = None,
@@ -33,6 +38,7 @@ class AvitoAccountRepository:
         webhook_secret = secrets.token_urlsafe(16)
         account = AvitoAccount(
             client_id=client_id,
+            project_id=project_id,
             name=name,
             api_client_id=api_client_id,
             api_client_secret=api_client_secret,

@@ -101,3 +101,18 @@ async def init_db() -> None:
                     "ALTER TABLE dialogs ADD COLUMN IF NOT EXISTS external_username VARCHAR"
                 )
             )
+            await conn.execute(
+                text(
+                    "ALTER TABLE dialogs ADD COLUMN IF NOT EXISTS project_id INTEGER"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE avito_accounts ADD COLUMN IF NOT EXISTS project_id INTEGER"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE telegram_sources ADD COLUMN IF NOT EXISTS project_id INTEGER"
+                )
+            )

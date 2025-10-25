@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from html import escape
-from typing import Any, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -15,6 +17,7 @@ from app.repositories.bot_repository import BotRepository
 from app.repositories.dialog_repository import DialogRepository
 from app.repositories.message_repository import MessageRepository
 from app.repositories.telegram_source_repository import TelegramSourceRepository
+from app.repositories.project_repository import ProjectRepository
 from app.services.telegram import TelegramService
 
 logger = logging.getLogger(__name__)
@@ -27,6 +30,7 @@ class TelegramSourceService:
         self.message_repo = MessageRepository(session)
         self.bot_repo = BotRepository(session)
         self.source_repo = TelegramSourceRepository(session)
+        self.project_repo = ProjectRepository(session)
 
     def build_webhook_url(self, source: TelegramSource) -> Optional[str]:
         base_url = settings.webhook_base_url
@@ -86,9 +90,50 @@ class TelegramSourceService:
         if not controller_bot.group_chat_id:
             raise ValueError("Для управляющего бота не настроен рабочий чат")
 
+        project = None
+        if getattr(source, "project_id", None):
+            project = await self.project_repo.get(source.project_id)
+            if project and project.bot_id and project.bot_id != controller_bot.id:
+                logger.warning(
+                    "Project %s linked to bot %s, but source %s uses bot %s",
+                    project.id,
+                    project.bot_id,
+                    source.id,
+                    controller_bot.id,
+                )
+            if project and project.bot_id is None:
+                try:
+                    project = await self.project_repo.update(project, bot_id=controller_bot.id)
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to attach bot %s to project %s", controller_bot.id, project.id)
+
         target_chat_id = controller_bot.group_chat_id
         manager_service = TelegramService(controller_bot.token)
         source_service = TelegramService(source.token)
+
+        if str(chat_id) == str(target_chat_id):
+            thread_id = message.get("message_thread_id")
+            dialog = None
+            if thread_id is not None:
+                dialog = await self.dialog_repo.get_by_topic(controller_bot.id, str(thread_id))
+            if dialog is None:
+                dialog = await self.dialog_repo.get_recent_by_chat(controller_bot.id, target_chat_id, source=DialogSource.telegram)
+            if dialog is None:
+                logger.warning(
+                    "Manager reply received but dialog not found",
+                    source_id=source.id,
+                    chat_id=chat_id,
+                    thread_id=thread_id,
+                )
+                return {"status": "ignored", "reason": "dialog_not_found"}
+
+            manager_message_id = message.get("message_id")
+            return await self.handle_manager_reply(
+                dialog=dialog,
+                bot=controller_bot,
+                telegram_message=message,
+                message_id=str(manager_message_id) if manager_message_id is not None else None,
+            )
 
         display_name = self._build_display_name(sender)
         username = sender.get("username")
@@ -98,6 +143,12 @@ class TelegramSourceService:
             telegram_source_id=source.id,
             external_reference=external_reference,
         )
+
+        if dialog is not None and project is not None and dialog.project_id != project.id:
+            dialog.project_id = project.id
+            dialog.updated_at = datetime.utcnow()
+            await self.session.commit()
+            await self.session.refresh(dialog)
 
         topic_id: Optional[str] = dialog.telegram_topic_id if dialog else None
         created_dialog = False
@@ -111,6 +162,7 @@ class TelegramSourceService:
             )
             dialog = await self.dialog_repo.create(
                 client_id=source.client_id,
+                project_id=project.id if project is not None else getattr(source, "project_id", None),
                 bot_id=controller_bot.id,
                 avito_dialog_id=f"tg:{source.id}:{external_reference}",
                 avito_account_id=None,
@@ -132,8 +184,6 @@ class TelegramSourceService:
                 username=username,
                 external_reference=external_reference,
             )
-
-        thread_id_int = self._normalize_topic_id(dialog.telegram_topic_id)
 
         updates_performed = False
         if display_name and display_name != dialog.external_display_name:
@@ -159,10 +209,20 @@ class TelegramSourceService:
 
         if text_value:
             rendered = f"💬 <b>{escape(client_label)}</b>\n{escape(text_value)}"
-            result = await manager_service.send_message(
-                chat_id=target_chat_id,
-                text=rendered,
-                message_thread_id=thread_id_int,
+            result, dialog = await self._send_manager_message_with_topic_recovery(
+                dialog=dialog,
+                bot=controller_bot,
+                manager_service=manager_service,
+                source=source,
+                display_name=display_name,
+                username=username,
+                external_reference=external_reference,
+                target_chat_id=target_chat_id,
+                send_callable=lambda thread_id: manager_service.send_message(
+                    chat_id=target_chat_id,
+                    text=rendered,
+                    message_thread_id=thread_id,
+                ),
             )
             manager_message_id = result.get("message_id")
             if manager_message_id is not None:
@@ -179,11 +239,21 @@ class TelegramSourceService:
                 else:
                     caption_prepared = f"📷 <b>{escape(client_label)}</b> отправил(а) фотографию"
 
-                result = await manager_service.send_photo(
-                    chat_id=target_chat_id,
-                    photo=(file_bytes, filename or "photo.jpg", content_type),
-                    caption=caption_prepared,
-                    message_thread_id=thread_id_int,
+                result, dialog = await self._send_manager_message_with_topic_recovery(
+                    dialog=dialog,
+                    bot=controller_bot,
+                    manager_service=manager_service,
+                    source=source,
+                    display_name=display_name,
+                    username=username,
+                    external_reference=external_reference,
+                    target_chat_id=target_chat_id,
+                    send_callable=lambda thread_id: manager_service.send_photo(
+                        chat_id=target_chat_id,
+                        photo=(file_bytes, filename or "photo.jpg", content_type),
+                        caption=caption_prepared,
+                        message_thread_id=thread_id,
+                    ),
                 )
                 manager_message_id = result.get("message_id")
                 if manager_message_id is not None:
@@ -198,10 +268,20 @@ class TelegramSourceService:
                 )
         elif caption_value and not text_value:
             rendered = f"💬 <b>{escape(client_label)}</b>\n{escape(caption_value)}"
-            result = await manager_service.send_message(
-                chat_id=target_chat_id,
-                text=rendered,
-                message_thread_id=thread_id_int,
+            result, dialog = await self._send_manager_message_with_topic_recovery(
+                dialog=dialog,
+                bot=controller_bot,
+                manager_service=manager_service,
+                source=source,
+                display_name=display_name,
+                username=username,
+                external_reference=external_reference,
+                target_chat_id=target_chat_id,
+                send_callable=lambda thread_id: manager_service.send_message(
+                    chat_id=target_chat_id,
+                    text=rendered,
+                    message_thread_id=thread_id,
+                ),
             )
             manager_message_id = result.get("message_id")
             if manager_message_id is not None:
@@ -317,6 +397,95 @@ class TelegramSourceService:
             "message_sent": message_sent or bool(photos),
         }
 
+    async def _send_manager_message_with_topic_recovery(
+        self,
+        *,
+        dialog: Dialog,
+        bot: Bot,
+        manager_service: TelegramService,
+        source: TelegramSource,
+        display_name: Optional[str],
+        username: Optional[str],
+        external_reference: str,
+        target_chat_id: str,
+        send_callable: Callable[[Optional[int]], Awaitable[Dict[str, Any]]],
+    ) -> tuple[Dict[str, Any], Dialog]:
+        thread_id = self._normalize_topic_id(dialog.telegram_topic_id)
+
+        ensure_topic = False
+        if thread_id is None and bot.topic_mode:
+            ensure_topic = True
+        else:
+            try:
+                result = await send_callable(thread_id)
+                return result, dialog
+            except httpx.HTTPStatusError as exc:
+                if not self._is_topic_missing_error(exc):
+                    raise
+                ensure_topic = True
+            except ValueError as exc:
+                if not self._is_topic_missing_error(exc):
+                    raise
+                ensure_topic = True
+
+        if not ensure_topic:
+            result = await send_callable(thread_id)
+            return result, dialog
+
+        dialog = await self.dialog_repo.set_topic(dialog, None)
+        client_label = display_name or username or external_reference
+        topic_id = await self._create_topic_if_needed(
+            manager_service=manager_service,
+            bot=bot,
+            target_chat_id=target_chat_id,
+            client_label=client_label,
+        )
+        if topic_id is None:
+            raise RuntimeError("Не удалось пересоздать топик для Telegram диалога")
+
+        dialog = await self.dialog_repo.set_topic(dialog, topic_id)
+        await self._send_intro_message(
+            manager_service=manager_service,
+            dialog=dialog,
+            bot=bot,
+            source=source,
+            display_name=display_name,
+            username=username,
+            external_reference=external_reference,
+        )
+        dialog.topic_intro_sent = True
+        await self.session.commit()
+        await self.session.refresh(dialog)
+
+        thread_id = self._normalize_topic_id(dialog.telegram_topic_id)
+        result = await send_callable(thread_id)
+        return result, dialog
+
+    @staticmethod
+    def _is_topic_missing_error(exc: Exception) -> bool:
+        if isinstance(exc, httpx.HTTPStatusError):
+            try:
+                payload = exc.response.json()
+                message = str(payload)
+            except Exception:  # noqa: BLE001
+                message = exc.response.text if exc.response else str(exc)
+        elif isinstance(exc, ValueError) and exc.args:
+            message = str(exc.args[0])
+        else:
+            message = str(exc)
+
+        message = message.lower()
+        return any(
+            phrase in message
+            for phrase in (
+                "message thread not found",
+                "message_thread_not_found",
+                "invalid message thread id",
+                "message can't be sent to thread",
+                "thread not found",
+            )
+        )
+
     async def _send_intro_message(
         self,
         *,
@@ -380,7 +549,8 @@ class TelegramSourceService:
         if topic_id is None:
             return None
         try:
-            return int(topic_id)
+            value = int(topic_id)
+            return value if value > 0 else None
         except (TypeError, ValueError):
             return None
 

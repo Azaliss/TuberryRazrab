@@ -3,6 +3,7 @@ from app.models.client import Client
 from app.models.bot import Bot
 from app.models.avito import AvitoAccount
 from app.models.dialog import Dialog
+from app.models.project import Project
 from app.models.message import Message
 from app.models.event import WebhookEvent
 from app.models.audit import AuditLog
@@ -16,6 +17,7 @@ __all__ = [
     "Bot",
     "AvitoAccount",
     "Dialog",
+    "Project",
     "Message",
     "WebhookEvent",
     "AuditLog",
