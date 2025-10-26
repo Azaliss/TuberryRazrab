@@ -38,11 +38,7 @@ function formatCountLabel(count: number, singular: string, plural: string) {
 
 function ProjectStatusBadge({ project }: { project: Project }) {
   if (!project.auto_reply_enabled) {
-    return (
-      <Badge variant="secondary" appearance="light" size="sm">
-        Автоответ выкл.
-      </Badge>
-    );
+    return null;
   }
   return (
     <Badge variant="success" appearance="light" size="sm">
@@ -68,6 +64,7 @@ export default function ClientProjectsPage() {
   const [botChats, setBotChats] = useState<TelegramChat[]>([]);
   const [botChatsLoading, setBotChatsLoading] = useState(false);
   const [botConnectLoading, setBotConnectLoading] = useState(false);
+  const [autoReplyUpdatingId, setAutoReplyUpdatingId] = useState<number | null>(null);
 
   const fetchBots = useCallback(async (): Promise<Bot[]> => {
     const botsResp = await apiFetch('/api/bots/');
@@ -281,6 +278,51 @@ export default function ClientProjectsPage() {
       }
     },
     [formState, load],
+  );
+
+  const handleToggleAutoReply = useCallback(
+    async (project: Project, nextValue: boolean) => {
+      setError(null);
+
+      if (nextValue) {
+        if (!project.auto_reply_text || !project.auto_reply_timezone) {
+          setError('Перед включением задайте текст и часовой пояс автоответчика в настройках проекта.');
+          return;
+        }
+        if (
+          !project.auto_reply_always &&
+          (!project.auto_reply_start_time || !project.auto_reply_end_time || project.auto_reply_start_time === project.auto_reply_end_time)
+        ) {
+          setError('Перед включением задайте расписание автоответчика в настройках проекта.');
+          return;
+        }
+      }
+
+      setAutoReplyUpdatingId(project.id);
+      try {
+        const payload: Record<string, unknown> = {
+          auto_reply_enabled: nextValue,
+        };
+        if (nextValue) {
+          payload.auto_reply_text = project.auto_reply_text;
+          payload.auto_reply_timezone = project.auto_reply_timezone;
+          payload.auto_reply_always = project.auto_reply_always;
+          payload.auto_reply_start_time = project.auto_reply_start_time;
+          payload.auto_reply_end_time = project.auto_reply_end_time;
+          payload.auto_reply_mode = project.auto_reply_mode;
+        }
+        await apiFetch(`/api/projects/${project.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+        await load();
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setAutoReplyUpdatingId(null);
+      }
+    },
+    [load],
   );
 
   return (
@@ -589,6 +631,18 @@ export default function ClientProjectsPage() {
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Автоответ</span>
+                    <Switch
+                      checked={project.auto_reply_enabled}
+                      disabled={autoReplyUpdatingId === project.id}
+                      onCheckedChange={(value) => void handleToggleAutoReply(project, Boolean(value))}
+                      aria-label="Переключить автоответ"
+                    />
+                    {autoReplyUpdatingId === project.id ? (
+                      <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                    ) : null}
+                  </div>
                   <Button asChild variant="outline" size="sm">
                     <Link href={`/client/projects/${project.id}`}>Открыть проект</Link>
                   </Button>
