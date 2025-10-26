@@ -1,4 +1,15 @@
-from app.routes import admin, auth, avito, bots, clients, dialogs, projects, telegram_sources, webhooks
+from app.routes import (
+    admin,
+    auth,
+    avito,
+    bots,
+    clients,
+    dialogs,
+    projects,
+    telegram_sources,
+    webhooks,
+    personal_telegram_accounts,
+)
 
 __all__ = [
     "admin",
@@ -10,4 +21,5 @@ __all__ = [
     "projects",
     "telegram_sources",
     "webhooks",
+    "personal_telegram_accounts",
 ]

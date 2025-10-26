@@ -8,6 +8,7 @@ from app.repositories.project_settings_repository import ProjectSettingsReposito
 from app.repositories.project_repository import ProjectRepository
 from app.repositories.telegram_chat_repository import TelegramChatRepository
 from app.repositories.telegram_source_repository import TelegramSourceRepository
+from app.repositories.personal_telegram_account_repository import PersonalTelegramAccountRepository
 
 __all__ = [
     "UserRepository",
@@ -20,4 +21,5 @@ __all__ = [
     "ProjectRepository",
     "TelegramChatRepository",
     "TelegramSourceRepository",
+    "PersonalTelegramAccountRepository",
 ]

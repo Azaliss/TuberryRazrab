@@ -88,6 +88,11 @@ async def init_db() -> None:
             )
             await conn.execute(
                 text(
+                    "ALTER TABLE dialogs ADD COLUMN IF NOT EXISTS personal_account_id INTEGER"
+                )
+            )
+            await conn.execute(
+                text(
                     "ALTER TABLE dialogs ADD COLUMN IF NOT EXISTS external_reference VARCHAR"
                 )
             )

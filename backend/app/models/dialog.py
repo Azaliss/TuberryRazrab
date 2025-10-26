@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.avito import AvitoAccount
     from app.models.message import Message
     from app.models.telegram_source import TelegramSource
+    from app.models.personal_telegram_account import PersonalTelegramAccount
 
 
 class Dialog(TimestampedModel, table=True):
@@ -26,6 +27,7 @@ class Dialog(TimestampedModel, table=True):
     )
     avito_account_id: Optional[int] = Field(default=None, foreign_key="avito_accounts.id")
     telegram_source_id: Optional[int] = Field(default=None, foreign_key="telegram_sources.id")
+    personal_account_id: Optional[int] = Field(default=None, foreign_key="personal_telegram_accounts.id")
     bot_id: int = Field(foreign_key="bots.id")
     avito_dialog_id: str = Field(index=True)
     telegram_topic_id: Optional[str] = Field(default=None, index=True)
@@ -42,4 +44,5 @@ class Dialog(TimestampedModel, table=True):
     bot: "Bot" = Relationship(back_populates="dialogs")
     avito_account: Optional["AvitoAccount"] = Relationship(back_populates="dialogs")
     telegram_source: Optional["TelegramSource"] = Relationship(back_populates="dialogs")
+    personal_account: Optional["PersonalTelegramAccount"] = Relationship()
     messages: List["Message"] = Relationship(back_populates="dialog")

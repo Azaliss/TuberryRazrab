@@ -19,6 +19,10 @@
 - `AVITO_POLLER_INTERVAL` — интервал опроса Avito API в секундах (по умолчанию 30).
 - `AVITO_POLLER_MARK_READ` — помечать ли чаты прочитанными после успешной доставки (`true`/`false`).
 - `AVITO_WEBHOOK_EVENTS` — JSON-список событий, на которые подписываемся при регистрации вебхука (по умолчанию `["message"]`). Изменяйте, только если Avito расширит перечень поддерживаемых событий.
+- `PERSONAL_TELEGRAM_API_ID`, `PERSONAL_TELEGRAM_API_HASH` — параметры приложения Telegram для MTProto (https://my.telegram.org → API development tools). Если оставить пустыми, Tuberry использует встроенные значения от официального клиента Telegram (Android).
+- `PERSONAL_TELEGRAM_SESSION_SECRET` — секрет для шифрования MTProto-сессий (по умолчанию используется `APP_SECRET`).
+- `PERSONAL_TELEGRAM_QR_TIMEOUT` — время действия QR-кода при авторизации личного аккаунта (секунды, по умолчанию 180).
+- `PERSONAL_TELEGRAM_DEVICE_MODEL`, `PERSONAL_TELEGRAM_SYSTEM_VERSION`, `PERSONAL_TELEGRAM_APP_VERSION`, `PERSONAL_TELEGRAM_LANG_CODE`, `PERSONAL_TELEGRAM_SYSTEM_LANG_CODE` — параметры эмуляции реального устройства. Базовые значения соответствуют Android-смартфону и подходят «из коробки», но при необходимости их можно переопределить.
 - OAuth-креды Авито (`client_id`, `client_secret`) вводятся для каждого аккаунта в кабинете клиента; backend хранит access_token и срок его жизни.
 
 Остальные значения можно оставить из примера либо скорректировать при необходимости.
@@ -40,7 +44,7 @@ cp frontend/.env.example frontend/.env
 docker compose up --build
 ```
 
-Сервисы backend, worker, Redis и Postgres стартуют автоматически. Фронтенд доступен по `http://localhost:3000`, API — по `http://localhost:8080`.
+Сервисы backend, worker, personal-worker, Redis и Postgres стартуют автоматически. Фронтенд доступен по `http://localhost:3000`, API — по `http://localhost:8080`.
 
 ### Прокси и HTTPS
 Для публичного домена (`tuberry.ru`) добавлен сервис `proxy` с Caddy.

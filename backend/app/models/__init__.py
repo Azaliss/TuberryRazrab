@@ -10,6 +10,7 @@ from app.models.audit import AuditLog
 from app.models.settings import ProjectSettings
 from app.models.telegram_chat import TelegramChat
 from app.models.telegram_source import TelegramSource
+from app.models.personal_telegram_account import PersonalTelegramAccount
 
 __all__ = [
     "User",
@@ -24,4 +25,5 @@ __all__ = [
     "ProjectSettings",
     "TelegramChat",
     "TelegramSource",
+    "PersonalTelegramAccount",
 ]

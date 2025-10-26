@@ -26,6 +26,7 @@ from app.repositories.project_repository import ProjectRepository
 from app.services.avito import AvitoService
 from app.services.telegram import TelegramService
 from app.services.queue import TaskQueue
+from app.services.personal_telegram_account import PersonalTelegramAccountService
 
 
 logger = logging.getLogger(__name__)
@@ -1741,6 +1742,54 @@ class DialogService:
                 telegram_message=telegram_message,
                 message_id=message_id,
             )
+        if dialog.source == DialogSource.personal_telegram.value:
+            if attachments:
+                raise ValueError("Личные Telegram аккаунты пока поддерживают только текстовые сообщения")
+            if not dialog.personal_account_id:
+                raise ValueError("Для диалога не задан личный Telegram аккаунт")
+
+            personal_service = PersonalTelegramAccountService(self.session)
+            account = await personal_service.account_repo.get(dialog.personal_account_id)
+            if account is None:
+                raise ValueError("Личный Telegram аккаунт недоступен")
+
+            outgoing_message = await self.message_repo.create(
+                dialog_id=dialog.id,
+                direction=MessageDirection.personal_telegram_out.value,
+                source_message_id=message_id,
+                body=text,
+                status=MessageStatus.pending.value,
+                is_client_message=False,
+            )
+
+            await personal_service.handle_manager_reply(
+                dialog_id=dialog.id,
+                message_id=outgoing_message.id,
+                project_id=dialog.project_id,
+                account=account,
+                text=text,
+            )
+            await self.dialog_repo.touch(dialog)
+
+            bot_for_topic = await self.bot_repo.get(dialog.bot_id)
+            if bot_for_topic and (dialog.telegram_chat_id or bot_for_topic.group_chat_id):
+                tg_service = TelegramService(bot_for_topic.token)
+                try:
+                    await self._update_topic_status(
+                        tg_service,
+                        chat_id=dialog.telegram_chat_id or bot_for_topic.group_chat_id,
+                        topic_id=dialog.telegram_topic_id,
+                        item_title=dialog.external_display_name or f"Диалог {dialog.id}",
+                        status="outgoing",
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to update topic status for personal telegram dialog", dialog_id=dialog.id)
+
+            return {
+                "dialog_id": dialog.id,
+                "queued": True,
+                "tasks": [{"kind": "text"}],
+            }
 
         dialog, project = await self._resolve_project_for_dialog(dialog, bot=bot)
 

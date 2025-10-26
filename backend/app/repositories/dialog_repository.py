@@ -65,6 +65,17 @@ class DialogRepository:
         result = await self.session.execute(select(Dialog).where(Dialog.bot_id == bot_id))
         return list(result.scalars().all())
 
+    async def list_for_personal_account(self, account_id: int) -> list[Dialog]:
+        result = await self.session.execute(
+            select(Dialog)
+            .where(
+                Dialog.personal_account_id == account_id,
+                Dialog.source == DialogSource.personal_telegram.value,
+            )
+            .order_by(Dialog.updated_at.desc())
+        )
+        return list(result.scalars().all())
+
     async def get_recent_by_chat(
         self,
         bot_id: int,
@@ -82,7 +93,26 @@ class DialogRepository:
             stmt = stmt.where(Dialog.source == (source.value if isinstance(source, DialogSource) else source))
 
         result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+        dialog = result.scalar_one_or_none()
+
+        if (
+            dialog is None
+            and source in (DialogSource.telegram, DialogSource.telegram.value)
+        ):
+            fallback_stmt = (
+                select(Dialog)
+                .where(
+                    Dialog.bot_id == bot_id,
+                    Dialog.telegram_chat_id == chat_id,
+                    Dialog.source == DialogSource.personal_telegram.value,
+                )
+                .order_by(Dialog.last_message_at.desc())
+                .limit(1)
+            )
+            fallback_result = await self.session.execute(fallback_stmt)
+            dialog = fallback_result.scalar_one_or_none()
+
+        return dialog
 
     async def create(
         self,
@@ -132,6 +162,21 @@ class DialogRepository:
                 Dialog.telegram_source_id == telegram_source_id,
                 Dialog.external_reference == external_reference,
                 Dialog.source == DialogSource.telegram.value,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_personal_account(
+        self,
+        *,
+        personal_account_id: int,
+        external_reference: str,
+    ) -> Dialog | None:
+        result = await self.session.execute(
+            select(Dialog).where(
+                Dialog.personal_account_id == personal_account_id,
+                Dialog.external_reference == external_reference,
+                Dialog.source == DialogSource.personal_telegram.value,
             )
         )
         return result.scalar_one_or_none()

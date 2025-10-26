@@ -8,6 +8,7 @@ from app.core.config import settings
 
 class TaskQueue:
     queue_name = "tuberry:tasks"
+    personal_queue_name = "tuberry:personal:tasks"
     outbound_prefix = "tuberry:avito:sent"
     outbound_ttl_seconds = 3600 * 12  # 12 часов достаточно для дедупликации
     _client: redis.Redis | None = None
@@ -27,6 +28,20 @@ class TaskQueue:
     async def dequeue(cls, timeout: int = 5) -> Dict[str, Any] | None:
         client = cls.client()
         item = await client.blpop(cls.queue_name, timeout=timeout)
+        if not item:
+            return None
+        _, data = item
+        return json.loads(data)
+
+    @classmethod
+    async def enqueue_personal(cls, task_type: str, payload: Dict[str, Any]) -> None:
+        client = cls.client()
+        await client.rpush(cls.personal_queue_name, json.dumps({"type": task_type, "payload": payload}))
+
+    @classmethod
+    async def dequeue_personal(cls, timeout: int = 5) -> Dict[str, Any] | None:
+        client = cls.client()
+        item = await client.blpop(cls.personal_queue_name, timeout=timeout)
         if not item:
             return None
         _, data = item

@@ -35,6 +35,7 @@ docker compose up -d --build        # пересобрать backend/frontend/ma
 - Backend: `docker compose logs -f backend`
 - Frontend (dev server): `docker compose logs -f frontend`
 - Worker: `docker compose logs -f worker`
+- Personal worker: `docker compose logs -f personal-worker`
 - Masterbot: `docker compose logs -f masterbot`
 - Caddy/HTTPS: `docker compose logs -f proxy`
 - Postgres: `docker compose logs -f postgres`
@@ -49,10 +50,11 @@ docker compose up -d --build        # пересобрать backend/frontend/ma
 - Бэкап: `docker compose exec postgres pg_dump -U tuberry tuberry > backup.sql`.
 - Восстановление: `docker compose exec -T postgres psql -U tuberry -d tuberry < backup.sql`.
 
-## Очередь и воркер
-- Очередь хранится в Redis ключом `tuberry:tasks`.
-- Форс-очистка: `docker compose exec redis redis-cli DEL tuberry:tasks`.
-- Если воркер не поднимается — проверьте логи и доступ к Redis (`REDIS_URL`).
+## Очереди и воркеры
+- Avito: Redis-ключ `tuberry:tasks`, обслуживание в `app/worker.py`.
+- Личные Telegram-аккаунты: Redis-ключ `tuberry:personal:tasks`, обслуживание в `app/workers/personal_telegram_worker.py`.
+- Форс-очистка: `docker compose exec redis redis-cli DEL <ключ>`.
+- При падении воркеров проверяйте логи (`docker compose logs -f worker`, `docker compose logs -f personal-worker`) и доступность Redis (`REDIS_URL`).
 
 ## Автоответчик
 - Включается в карточке проекта (раздел `/client`) блоком «Автоответ». Можно выбрать круглосуточный режим или задать интервал и часовой пояс (только города РФ).
@@ -71,6 +73,15 @@ docker compose up -d --build        # пересобрать backend/frontend/ma
 - Работает через long polling (`getUpdates`). При падении — проверяйте токен и сетевой доступ к `https://api.telegram.org`.
 - Принудительный перезапуск: `docker compose restart masterbot`.
 - Для диагностики можно отправить команде `/start` — в логе должно появиться выдача токена.
+
+## Личные Telegram-аккаунты
+- Подробная архитектура и сценарии описаны в `docs/PERSONAL_TELEGRAM_ACCOUNTS.md`.
+- Для подключения сотрудник сканирует QR-код в разделе «Настройки → Личные Telegram-аккаунты». QR активно `PERSONAL_TELEGRAM_QR_TIMEOUT` секунд.
+- Перед подключением убедитесь, что у проекта есть управляющий бот с настроенным `group_chat_id`. Без этого worker не сможет доставлять сообщения.
+- Успешные авторизации фиксируются в таблице `personal_telegram_accounts` (статус `active`). При ошибках статус становится `error`, подробности — в поле `last_error` и логах `personal-worker`.
+- В разделе настроек можно отключить приём из личных чатов, групп или каналов — togglы обновляются через `PATCH /api/personal-telegram-accounts/{id}` и вступают в силу сразу.
+- Удаление аккаунта (`DELETE /api/personal-telegram-accounts/{id}`) отзывает MTProto-сессию и очищает привязку диалогов (поле `personal_account_id` становится `NULL`). Для повторного использования требуется заново пройти авторизацию по QR.
+- Очередь исходящих сообщений `tuberry:personal:tasks` можно мониторить через `docker compose exec redis redis-cli LLEN tuberry:personal:tasks`.
 
 ## Telegram и Avito
 - **Telegram webhook** — `https://tuberry.ru/api/webhooks/telegram/<BOT_ID>/<WEBHOOK_SECRET>`. `BOT_ID` — первичный ключ в таблице `bots`, `WEBHOOK_SECRET` автоматически генерируется при создании/обновлении бота и хранится там же.

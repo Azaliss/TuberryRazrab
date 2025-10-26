@@ -142,7 +142,7 @@ export default function DialogsPage() {
       if (!selectedDialogId) return;
       const trimmed = messageDraft.trim();
       if (!trimmed) return;
-      if (detail?.dialog.source === 'telegram') {
+      if (detail?.dialog.source === 'telegram' || detail?.dialog.source === 'personal_telegram') {
         setSendError('Ответы отправляются в рабочем Telegram-чате. В портале отправка недоступна для этого источника.');
         return;
       }
@@ -189,18 +189,25 @@ export default function DialogsPage() {
           ) : (
             dialogs.map((dialog) => {
               const isActive = dialog.id === selectedDialogId;
-              const primaryLabel =
-                dialog.source === 'telegram'
-                  ? `Telegram • ${dialog.external_display_name || dialog.external_username || dialog.avito_dialog_id}`
-                  : `Avito #${dialog.avito_dialog_id}`;
-              const secondaryLabel =
-                dialog.source === 'telegram'
-                  ? dialog.external_username
-                    ? `@${dialog.external_username}`
-                    : dialog.external_reference
-                    ? `ID: ${dialog.external_reference}`
-                    : `Диалог #${dialog.id}`
+              let primaryLabel: string;
+              if (dialog.source === 'telegram') {
+                primaryLabel = `Telegram • ${dialog.external_display_name || dialog.external_username || dialog.avito_dialog_id}`;
+              } else if (dialog.source === 'personal_telegram') {
+                primaryLabel = `Личный Telegram • ${dialog.external_display_name || dialog.external_username || dialog.external_reference || dialog.avito_dialog_id}`;
+              } else {
+                primaryLabel = `Avito #${dialog.avito_dialog_id}`;
+              }
+
+              let secondaryLabel: string;
+              if (dialog.source === 'telegram' || dialog.source === 'personal_telegram') {
+                secondaryLabel = dialog.external_username
+                  ? `@${dialog.external_username}`
+                  : dialog.external_reference
+                  ? `ID: ${dialog.external_reference}`
                   : `Диалог #${dialog.id}`;
+              } else {
+                secondaryLabel = dialog.external_display_name || dialog.external_username || `Диалог #${dialog.id}`;
+              }
               return (
                 <button
                   key={dialog.id}

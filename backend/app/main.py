@@ -3,7 +3,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.db.session import init_db
-from app.routes import admin, auth, avito, bots, clients, dialogs, projects, telegram_sources, webhooks
+from app.routes import (
+    admin,
+    auth,
+    avito,
+    bots,
+    clients,
+    dialogs,
+    projects,
+    telegram_sources,
+    webhooks,
+    personal_telegram_accounts,
+)
 
 app = FastAPI(title="Tuberry API", version="0.1.0")
 
@@ -29,6 +40,11 @@ app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(avito.router, prefix="/api/avito", tags=["avito"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(telegram_sources.router, prefix="/api/telegram-sources", tags=["telegram-sources"])
+app.include_router(
+    personal_telegram_accounts.router,
+    prefix="/api/personal-telegram-accounts",
+    tags=["personal-telegram-accounts"],
+)
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["webhooks"])
 
 

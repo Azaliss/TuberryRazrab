@@ -19,6 +19,12 @@ class TelegramSourceStatus(str, Enum):
     error = "error"
 
 
+class PersonalTelegramAccountStatus(str, Enum):
+    pending = "pending"
+    active = "active"
+    error = "error"
+
+
 class AvitoAccountStatus(str, Enum):
     active = "active"
     expired = "expired"
@@ -35,6 +41,8 @@ class MessageDirection(str, Enum):
     telegram = "telegram"
     telegram_source_in = "telegram_source_in"
     telegram_source_out = "telegram_source_out"
+    personal_telegram_in = "personal_telegram_in"
+    personal_telegram_out = "personal_telegram_out"
 
 
 class MessageStatus(str, Enum):
@@ -52,3 +60,4 @@ class AutoReplyMode(str, Enum):
 class DialogSource(str, Enum):
     avito = "avito"
     telegram = "telegram"
+    personal_telegram = "personal_telegram"

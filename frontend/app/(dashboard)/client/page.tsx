@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/base-switch';
 import { Textarea } from '@/components/ui/textarea';
 import { apiFetch } from '@/lib/api';
-import type { AvitoAccount, Bot, Project, TelegramSource, TelegramChat } from './types';
+import type { AvitoAccount, Bot, Project, TelegramSource, TelegramChat, PersonalTelegramAccount } from './types';
 import { Loader2, PlusCircle, RefreshCcw, Sparkles, Plug } from 'lucide-react';
 
 type CreateProjectFormState = {
@@ -56,6 +56,7 @@ export default function ClientProjectsPage() {
   const [bots, setBots] = useState<Bot[]>([]);
   const [accounts, setAccounts] = useState<AvitoAccount[]>([]);
   const [sources, setSources] = useState<TelegramSource[]>([]);
+  const [personalAccounts, setPersonalAccounts] = useState<PersonalTelegramAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -77,15 +78,17 @@ export default function ClientProjectsPage() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [projectsResp, accountsResp, sourcesResp] = await Promise.all([
+      const [projectsResp, accountsResp, sourcesResp, personalAccountsResp] = await Promise.all([
         apiFetch('/api/projects'),
         apiFetch('/api/avito/accounts'),
         apiFetch('/api/telegram-sources'),
+        apiFetch('/api/personal-telegram-accounts'),
       ]);
       const botsResp = await fetchBots();
-      setProjects(projectsResp);
-      setAccounts(accountsResp);
-      setSources(sourcesResp);
+      setProjects(projectsResp as Project[]);
+      setAccounts(accountsResp as AvitoAccount[]);
+      setSources(sourcesResp as TelegramSource[]);
+      setPersonalAccounts(personalAccountsResp as PersonalTelegramAccount[]);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -523,6 +526,7 @@ export default function ClientProjectsPage() {
         {projects.map((project) => {
           const projectAccounts = accounts.filter((account) => account.project_id === project.id);
           const projectSources = sources.filter((source) => source.project_id === project.id);
+          const projectPersonal = personalAccounts.filter((account) => account.project_id === project.id);
           const projectBot = project.bot_id ? bots.find((bot) => bot.id === project.bot_id) : undefined;
 
           return (
@@ -564,6 +568,12 @@ export default function ClientProjectsPage() {
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm text-muted-foreground">Личные аккаунты</div>
+                      <span className="text-sm font-medium text-foreground">
+                        {formatCountLabel(projectPersonal.length, 'аккаунт', 'аккаунтов')}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
                       <div className="text-sm text-muted-foreground">Цитирование</div>
                       <Badge appearance="light" variant={project.require_reply_for_sources ? 'warning' : 'secondary'} size="sm">
                         {project.require_reply_for_sources ? 'Требуется' : 'Не требуется'}
@@ -598,12 +608,12 @@ export default function ClientProjectsPage() {
               Создайте первый проект, чтобы связать Telegram-бота, рабочую группу и источники сообщений в единое рабочее пространство.
             </p>
           </div>
-          <Button onClick={() => setShowCreateForm(true)}>
-            <PlusCircle className="mr-2 size-4" />
-            Создать проект
-          </Button>
-        </div>
-      )}
+      <Button onClick={() => setShowCreateForm(true)}>
+        <PlusCircle className="mr-2 size-4" />
+        Создать проект
+      </Button>
     </div>
-  );
+  )}
+</div>
+);
 }

@@ -37,6 +37,23 @@ services:
     volumes:
       - ./backend:/app
 
+  personal-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: python -m app.workers.personal_telegram_worker
+    restart: unless-stopped
+    env_file:
+      - backend/.env.example
+      - backend/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+
   masterbot:
     build:
       context: ./backend

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app.models.bot import Bot
     from app.models.avito import AvitoAccount
     from app.models.telegram_source import TelegramSource
+    from app.models.personal_telegram_account import PersonalTelegramAccount
 
 
 class Client(TimestampedModel, table=True):

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from datetime import time
-from typing import Optional
+from typing import TYPE_CHECKING, List, Optional
 
-from sqlmodel import Field
+from sqlmodel import Field, Relationship
 
 from app.models.base import TimestampedModel
 from app.models.enums import AutoReplyMode
+
+if TYPE_CHECKING:
+    from app.models.personal_telegram_account import PersonalTelegramAccount
 
 class Project(TimestampedModel, table=True):
     __tablename__ = "projects"

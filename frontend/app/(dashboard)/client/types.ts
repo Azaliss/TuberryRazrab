@@ -43,8 +43,9 @@ export interface Project {
 
 export interface Dialog {
   id: number;
-  source: 'avito' | 'telegram';
+  source: 'avito' | 'telegram' | 'personal_telegram';
   telegram_source_id?: number;
+  personal_account_id?: number;
   avito_dialog_id: string;
   telegram_topic_id?: string;
   last_message_at?: string;
@@ -81,7 +82,7 @@ export interface TelegramChat {
 
 export interface DialogMessage {
   id: number;
-  direction: 'avito' | 'telegram' | 'telegram_source_in' | 'telegram_source_out';
+  direction: 'avito' | 'telegram' | 'telegram_source_in' | 'telegram_source_out' | 'personal_telegram_in' | 'personal_telegram_out';
   body: string;
   status: string;
   created_at?: string;
@@ -103,4 +104,34 @@ export interface TelegramSource {
 export interface DialogDetail {
   dialog: Dialog;
   messages: DialogMessage[];
+}
+
+export interface PersonalTelegramAccount {
+  id: number;
+  client_id: number;
+  project_id: number;
+  display_name?: string | null;
+  username?: string | null;
+  phone?: string | null;
+  telegram_user_id?: string | null;
+  status: 'pending' | 'active' | 'error';
+  accepts_private: boolean;
+  accepts_groups: boolean;
+  accepts_channels: boolean;
+  last_connected_at?: string | null;
+  last_error?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface PersonalTelegramAccountLoginResponse {
+  login_id: string;
+  qr_url: string;
+  expires_at?: string;
+}
+
+export interface PersonalTelegramAccountLoginStatus {
+  status: 'pending' | 'ready' | 'password_required' | 'completed' | 'error' | 'expired';
+  account?: PersonalTelegramAccount | null;
+  error?: string | null;
 }

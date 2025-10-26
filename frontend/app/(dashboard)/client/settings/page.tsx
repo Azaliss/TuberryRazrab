@@ -35,8 +35,19 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { apiFetch } from '@/lib/api';
-import type { AvitoAccount, Bot, Dialog, TelegramChat, TelegramSource } from '../types';
-import { Eye, EyeOff, Loader2, RefreshCcw, Trash2 } from 'lucide-react';
+import QRCode from 'qrcode';
+import type {
+  AvitoAccount,
+  Bot,
+  Dialog,
+  PersonalTelegramAccount,
+  PersonalTelegramAccountLoginResponse,
+  PersonalTelegramAccountLoginStatus,
+  Project,
+  TelegramChat,
+  TelegramSource,
+} from '../types';
+import { Eye, EyeOff, Loader2, PlusCircle, RefreshCcw, Trash2 } from 'lucide-react';
 
 const initialBotForm = {
   token: '',
@@ -118,11 +129,46 @@ function ConfirmAction({ title, description, confirmLabel = 'Подтверди�
   );
 }
 
+type PersonalLoginState = {
+  loginId: string;
+  projectId: number;
+  projectName: string;
+  qrUrl: string;
+  expiresAt?: string;
+  status: PersonalTelegramAccountLoginStatus['status'];
+  error?: string | null;
+  account?: PersonalTelegramAccount | null;
+  open: boolean;
+};
+
+function formatDateTime(value?: string | null): string {
+  if (!value) {
+    return '—';
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return '—';
+  }
+  return new Intl.DateTimeFormat('ru-RU', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(parsed);
+}
+
 export default function ClientSettingsPage() {
   const [bots, setBots] = useState<Bot[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [accounts, setAccounts] = useState<AvitoAccount[]>([]);
   const [dialogs, setDialogs] = useState<Dialog[]>([]);
   const [telegramSources, setTelegramSources] = useState<TelegramSource[]>([]);
+  const [personalAccounts, setPersonalAccounts] = useState<PersonalTelegramAccount[]>([]);
+  const [personalLogin, setPersonalLogin] = useState<PersonalLoginState | null>(null);
+  const [personalUpdatingId, setPersonalUpdatingId] = useState<number | null>(null);
+  const [loginInProgressProject, setLoginInProgressProject] = useState<number | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [personalPassword, setPersonalPassword] = useState('');
+  const [personalPasswordSubmitting, setPersonalPasswordSubmitting] = useState(false);
+  const [personalPasswordError, setPersonalPasswordError] = useState<string | null>(null);
 
   const [botForm, setBotForm] = useState(initialBotForm);
   const [avitoForm, setAvitoForm] = useState(initialAvitoForm);
@@ -154,16 +200,27 @@ export default function ClientSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [copiedSourceId, setCopiedSourceId] = useState<number | null>(null);
   const copyTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const loginPollRef = useRef<NodeJS.Timeout | null>(null);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [clientResp, botsResp, accountsResp, dialogsResp, telegramSourcesResp] = await Promise.all([
+      const [
+        clientResp,
+        botsResp,
+        accountsResp,
+        dialogsResp,
+        telegramSourcesResp,
+        projectsResp,
+        personalAccountsResp,
+      ] = await Promise.all([
         apiFetch('/api/clients/me'),
         apiFetch('/api/bots/'),
         apiFetch('/api/avito/accounts'),
         apiFetch('/api/dialogs/'),
         apiFetch('/api/telegram-sources'),
+        apiFetch('/api/projects'),
+        apiFetch('/api/personal-telegram-accounts'),
       ]);
       const botsData = botsResp as Bot[];
       setFilterText(clientResp.filter_keywords ?? '');
@@ -181,6 +238,8 @@ export default function ClientSettingsPage() {
       setAutoReplyText(clientResp.auto_reply_text ?? '');
       setBots(botsData);
       setTelegramSources(telegramSourcesResp as TelegramSource[]);
+      setProjects(projectsResp as Project[]);
+      setPersonalAccounts(personalAccountsResp as PersonalTelegramAccount[]);
       setBotChats((prev) => {
         const allowed = new Set(botsData.map((bot) => bot.id));
         const next: Record<number, TelegramChat[]> = {};
@@ -213,6 +272,11 @@ export default function ClientSettingsPage() {
     }
   }, []);
 
+  const reloadPersonalAccounts = useCallback(async () => {
+    const data = (await apiFetch('/api/personal-telegram-accounts')) as PersonalTelegramAccount[];
+    setPersonalAccounts(data);
+  }, []);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -230,6 +294,18 @@ export default function ClientSettingsPage() {
     [bots],
   );
   const botLookup = useMemo(() => new Map(bots.map((bot) => [bot.id, bot])), [bots]);
+  const personalAccountsByProject = useMemo(() => {
+    const map = new Map<number, PersonalTelegramAccount[]>();
+    personalAccounts.forEach((account) => {
+      const list = map.get(account.project_id);
+      if (list) {
+        list.push(account);
+      } else {
+        map.set(account.project_id, [account]);
+      }
+    });
+    return map;
+  }, [personalAccounts]);
   const timeOptions = useMemo(() => {
     const result: string[] = [];
     for (let hour = 0; hour < 24; hour += 1) {
@@ -399,14 +475,225 @@ export default function ClientSettingsPage() {
     [],
   );
 
-  useEffect(
-    () => () => {
+  const closeLoginModal = useCallback(() => {
+    if (loginPollRef.current) {
+      clearInterval(loginPollRef.current);
+      loginPollRef.current = null;
+    }
+    setPersonalLogin(null);
+    setQrDataUrl(null);
+    setLoginInProgressProject(null);
+    setPersonalPassword('');
+    setPersonalPasswordError(null);
+    setPersonalPasswordSubmitting(false);
+  }, []);
+
+  const startLoginPolling = useCallback(
+    (loginId: string) => {
+      if (loginPollRef.current) {
+        clearInterval(loginPollRef.current);
+      }
+      loginPollRef.current = setInterval(async () => {
+        try {
+          const statusResp = (await apiFetch(
+            `/api/personal-telegram-accounts/login/${loginId}`,
+          )) as PersonalTelegramAccountLoginStatus;
+          setPersonalLogin((prev) =>
+            prev && prev.loginId === loginId
+              ? {
+                  ...prev,
+                  status: statusResp.status,
+                  error: statusResp.error ?? null,
+                  account: statusResp.account ?? prev.account ?? null,
+                }
+              : prev,
+          );
+          if (statusResp.status === 'password_required') {
+            if (loginPollRef.current) {
+              clearInterval(loginPollRef.current);
+              loginPollRef.current = null;
+            }
+            setPersonalPassword('');
+            setPersonalPasswordError(null);
+            return;
+          }
+          if (statusResp.status === 'completed') {
+            if (loginPollRef.current) {
+              clearInterval(loginPollRef.current);
+              loginPollRef.current = null;
+            }
+            setPersonalPassword('');
+            setPersonalPasswordError(null);
+            try {
+              await reloadPersonalAccounts();
+            } catch (error) {
+              console.error('Не удалось обновить список личных аккаунтов', error);
+            }
+            setFlash('Личный Telegram-аккаунт подключён.');
+            setTimeout(() => {
+              setPersonalLogin((prev) =>
+                prev && prev.loginId === loginId ? { ...prev, open: false } : prev,
+              );
+            }, 2500);
+          } else if (statusResp.status === 'error' || statusResp.status === 'expired') {
+            if (loginPollRef.current) {
+              clearInterval(loginPollRef.current);
+              loginPollRef.current = null;
+            }
+          }
+        } catch (err) {
+          console.error('Не удалось обновить статус авторизации', err);
+        }
+      }, 3000);
+    },
+    [reloadPersonalAccounts, setFlash],
+  );
+
+  const handleStartPersonalLogin = useCallback(
+    async (project: Project) => {
+      if (!project.bot_id) {
+        setError('Привяжите управляющего бота к проекту, чтобы подключать личные аккаунты.');
+        return;
+      }
+      const controllerBot = bots.find((bot) => bot.id === project.bot_id);
+      if (!controllerBot || !controllerBot.group_chat_id) {
+        setError('Добавьте управляющего бота в рабочую группу, чтобы подключать личные аккаунты.');
+        return;
+      }
+
+      setError(null);
+      setFlash(null);
+      setLoginInProgressProject(project.id);
+      setPersonalPassword('');
+      setPersonalPasswordError(null);
+      try {
+        const response = (await apiFetch('/api/personal-telegram-accounts/login', {
+          method: 'POST',
+          body: JSON.stringify({ project_id: project.id }),
+        })) as PersonalTelegramAccountLoginResponse;
+        const dataUrl = await QRCode.toDataURL(response.qr_url, { margin: 2, width: 260 });
+        setQrDataUrl(dataUrl);
+        setPersonalLogin({
+          loginId: response.login_id,
+          projectId: project.id,
+          projectName: project.name,
+          qrUrl: response.qr_url,
+          expiresAt: response.expires_at,
+          status: 'ready',
+          error: null,
+          account: null,
+          open: true,
+        });
+        startLoginPolling(response.login_id);
+      } catch (err) {
+        setError((err as Error).message);
+        closeLoginModal();
+      } finally {
+        setLoginInProgressProject(null);
+      }
+    },
+    [bots, closeLoginModal, setError, setFlash, startLoginPolling],
+  );
+
+  const handleSubmitPersonalPassword = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!personalLogin) {
+        return;
+      }
+      const trimmed = personalPassword.trim();
+      if (!trimmed) {
+        setPersonalPasswordError('Введите пароль двухфакторной аутентификации.');
+        return;
+      }
+      setPersonalPasswordSubmitting(true);
+      setPersonalPasswordError(null);
+      try {
+        const response = (await apiFetch(
+          `/api/personal-telegram-accounts/login/${personalLogin.loginId}/password`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ password: trimmed }),
+          },
+        )) as PersonalTelegramAccountLoginStatus;
+        setPersonalLogin((prev) =>
+          prev && prev.loginId === personalLogin.loginId
+            ? {
+                ...prev,
+                status: response.status,
+                error: response.error ?? null,
+                account: response.account ?? prev.account ?? null,
+              }
+            : prev,
+        );
+        if (response.status === 'password_required') {
+          return;
+        }
+        setPersonalPassword('');
+        setPersonalPasswordError(null);
+        startLoginPolling(personalLogin.loginId);
+      } catch (err) {
+        setPersonalPasswordError((err as Error).message);
+      } finally {
+        setPersonalPasswordSubmitting(false);
+      }
+    },
+    [personalLogin, personalPassword, startLoginPolling],
+  );
+
+  const handleTogglePersonalAccess = useCallback(
+    async (
+      account: PersonalTelegramAccount,
+      field: 'accepts_private' | 'accepts_groups' | 'accepts_channels',
+      value: boolean,
+    ) => {
+      setError(null);
+      setFlash(null);
+      setPersonalUpdatingId(account.id);
+      try {
+        await apiFetch(`/api/personal-telegram-accounts/${account.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ [field]: value }),
+        });
+        await reloadPersonalAccounts();
+        setFlash('Настройки обновлены.');
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setPersonalUpdatingId(null);
+      }
+    },
+    [reloadPersonalAccounts],
+  );
+
+  const handleDeletePersonalAccount = useCallback(
+    async (accountId: number) => {
+      setError(null);
+      setFlash(null);
+      setPersonalUpdatingId(accountId);
+      try {
+        await apiFetch(`/api/personal-telegram-accounts/${accountId}`, { method: 'DELETE' });
+        await reloadPersonalAccounts();
+        setFlash('Личный аккаунт отключён.');
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setPersonalUpdatingId(null);
+      }
+    },
+    [reloadPersonalAccounts],
+  );
+
+  useEffect(() => {
+    return () => {
       if (copyTimerRef.current) {
         clearTimeout(copyTimerRef.current);
       }
-    },
-    [],
-  );
+      if (loginPollRef.current) {
+        clearInterval(loginPollRef.current);
+      }
+    };
+  }, []);
 
   const handleFilterSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -658,6 +945,99 @@ export default function ClientSettingsPage() {
         </Alert>
       )}
 
+      <AlertDialog
+        open={Boolean(personalLogin?.open)}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeLoginModal();
+          }
+        }}
+      >
+        <AlertDialogContent className="max-w-lg space-y-4">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Подключение личного Telegram-аккаунта</AlertDialogTitle>
+            <AlertDialogDescription>
+              {personalLogin ? `Проект: ${personalLogin.projectName}` : 'Инициализация сессии…'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {qrDataUrl ? (
+            <img
+              src={qrDataUrl}
+              alt="QR-код для авторизации"
+              className="mx-auto h-56 w-56 rounded-2xl border border-[var(--app-border)] bg-white p-4 shadow-sm"
+            />
+          ) : personalLogin ? (
+            <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-blue-200/80 bg-blue-50/60 p-6 text-sm text-muted-foreground">
+              <Loader2 className="size-5 animate-spin text-blue-500" />
+              <span>Готовим QR-код…</span>
+            </div>
+          ) : null}
+          {personalLogin?.expiresAt ? (
+            <p className="text-xs text-muted-foreground text-center">
+              QR действителен до {formatDateTime(personalLogin.expiresAt)}. После истечения запустите подключение заново.
+            </p>
+          ) : null}
+          {personalLogin ? (
+            <div className="rounded-2xl border border-[var(--app-border)] bg-white/85 p-4 text-sm text-foreground">
+              {personalLogin.status === 'ready' && (
+                <span>Сканируйте QR-код с телефона в Telegram и подтвердите подключение устройства.</span>
+              )}
+              {personalLogin.status === 'pending' && (
+                <span>Ожидаем подтверждения авторизации. Сканируйте QR-код в Telegram.</span>
+              )}
+              {personalLogin.status === 'password_required' && (
+                <span>
+                  Для аккаунта включена двухфакторная аутентификация. Введите пароль, чтобы завершить подключение.
+                </span>
+              )}
+              {personalLogin.status === 'completed' && personalLogin.account && (
+                <span>
+                  Аккаунт{' '}
+                  {personalLogin.account.display_name ||
+                    personalLogin.account.username ||
+                    personalLogin.account.telegram_user_id ||
+                    `ID ${personalLogin.account.id}`}{' '}
+                  успешно подключён. Входящие сообщения появятся в рабочей группе проекта.
+                </span>
+              )}
+              {(personalLogin.status === 'error' || personalLogin.status === 'expired') && (
+                <span className="text-destructive">
+                  {personalLogin.error || 'Авторизацию не удалось завершить. Попробуйте снова.'}
+                </span>
+              )}
+            </div>
+          ) : null}
+          {personalLogin?.status === 'password_required' && (
+            <form className="space-y-3" onSubmit={handleSubmitPersonalPassword}>
+              <div className="space-y-2">
+                <Label htmlFor="personal-password-settings">Пароль Telegram</Label>
+                <Input
+                  id="personal-password-settings"
+                  type="password"
+                  value={personalPassword}
+                  onChange={(event) => setPersonalPassword(event.target.value)}
+                  autoComplete="current-password"
+                />
+                {(personalLogin.error || personalPasswordError) && (
+                  <p className="text-xs text-destructive">{personalLogin.error || personalPasswordError}</p>
+                )}
+              </div>
+              <div className="flex justify-end">
+                <Button type="submit" disabled={personalPasswordSubmitting}>
+                  {personalPasswordSubmitting ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+                  Подтвердить пароль
+                </Button>
+              </div>
+            </form>
+          )}
+          <AlertDialogFooter>
+            <Button variant="secondary" onClick={closeLoginModal}>
+              Закрыть
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <Accordion multiple variant="outline" defaultValue={["filter", "bot"]} className="space-y-3">
         <AccordionItem value="filter" className="glass-panel rounded-2xl border border-[var(--app-border)]">
           <AccordionHeader>
@@ -712,6 +1092,188 @@ export default function ClientSettingsPage() {
                 </Button>
               </div>
             </form>
+          </AccordionPanel>
+        </AccordionItem>
+
+        <AccordionItem value="personal-telegram" className="glass-panel rounded-2xl border border-[var(--app-border)]">
+          <AccordionHeader>
+            <AccordionTrigger>
+              <span className="text-base font-semibold">Личные Telegram-аккаунты</span>
+            </AccordionTrigger>
+          </AccordionHeader>
+          <AccordionPanel>
+            <div className="space-y-5">
+              <p className="text-sm text-muted-foreground">
+                Подключайте личные аккаунты сотрудников через QR-код. Сообщения будут поступать в рабочую группу проекта и
+                отображаться в диалогах Tuberry.
+              </p>
+              {projects.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-4 text-sm text-muted-foreground">
+                  Сначала создайте проект и привяжите управляющего бота в разделе «Проекты».
+                </div>
+              ) : (
+                projects.map((project) => {
+                  const linkedBot = project.bot_id ? botLookup.get(project.bot_id) : undefined;
+                  const accountsForProject = personalAccountsByProject.get(project.id) ?? [];
+                  const canAddAccount = Boolean(linkedBot && linkedBot.group_chat_id);
+                  const projectStatusNote = !canAddAccount
+                    ? 'Чтобы подключить аккаунт, укажите рабочую группу в настройках бота проекта.'
+                    : '';
+                  return (
+                    <div
+                      key={project.id}
+                      className="rounded-2xl border border-dashed border-[var(--app-border)]/80 bg-white/80 p-4 shadow-sm"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-semibold text-foreground">{project.name}</h3>
+                          <p className="text-xs text-muted-foreground">
+                            Управляющий бот:{' '}
+                            {linkedBot ? `@${linkedBot.bot_username ?? `bot_${linkedBot.id}`}` : 'не привязан'}
+                          </p>
+                          {projectStatusNote ? (
+                            <p className="text-xs text-muted-foreground">{projectStatusNote}</p>
+                          ) : null}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={!canAddAccount || loginInProgressProject === project.id}
+                          onClick={() => void handleStartPersonalLogin(project)}
+                        >
+                          {loginInProgressProject === project.id ? (
+                            <>
+                              <Loader2 className="mr-2 size-4 animate-spin" />
+                              Готовим QR…
+                            </>
+                          ) : (
+                            <>
+                              <PlusCircle className="mr-2 size-4" />
+                              Добавить аккаунт
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                      {accountsForProject.length === 0 ? (
+                        <div className="mt-4 rounded-2xl border border-dashed border-slate-200/80 bg-white/60 p-3 text-xs text-muted-foreground">
+                          Подключённых аккаунтов пока нет.
+                        </div>
+                      ) : (
+                        <div className="mt-4 space-y-3">
+                          {accountsForProject.map((account) => {
+                            const statusVariant =
+                              account.status === 'active'
+                                ? 'success'
+                                : account.status === 'error'
+                                ? 'destructive'
+                                : 'secondary';
+                            const statusLabel =
+                              account.status === 'active'
+                                ? 'Активен'
+                                : account.status === 'error'
+                                ? 'Ошибка'
+                                : 'Ожидание';
+                            return (
+                              <div
+                                key={account.id}
+                                className="rounded-2xl border border-[var(--app-border)] bg-white/80 p-4 shadow-sm"
+                              >
+                                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                                  <div className="space-y-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-semibold text-foreground">
+                                        {account.display_name || account.username || `Аккаунт #${account.id}`}
+                                      </span>
+                                      <Badge appearance="light" variant={statusVariant} size="xs">
+                                        {statusLabel}
+                                      </Badge>
+                                    </div>
+                                    {account.username ? (
+                                      <p className="text-xs text-muted-foreground">@{account.username}</p>
+                                    ) : null}
+                                    {account.phone ? (
+                                      <p className="text-xs text-muted-foreground">Телефон: {account.phone}</p>
+                                    ) : null}
+                                    <p className="text-xs text-muted-foreground">
+                                      Последнее подключение: {formatDateTime(account.last_connected_at)}
+                                    </p>
+                                    {account.last_error ? (
+                                      <p className="text-xs text-destructive">Ошибка: {account.last_error}</p>
+                                    ) : null}
+                                  </div>
+                                  <div className="flex flex-wrap items-start gap-4">
+                                    <div className="flex flex-col gap-1">
+                                      <span className="text-xs text-muted-foreground">Личные чаты</span>
+                                      <Switch
+                                        checked={account.accepts_private}
+                                        disabled={personalUpdatingId === account.id}
+                                        onCheckedChange={(value) =>
+                                          void handleTogglePersonalAccess(
+                                            account,
+                                            'accepts_private',
+                                            Boolean(value),
+                                          )
+                                        }
+                                      />
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                      <span className="text-xs text-muted-foreground">Группы</span>
+                                      <Switch
+                                        checked={account.accepts_groups}
+                                        disabled={personalUpdatingId === account.id}
+                                        onCheckedChange={(value) =>
+                                          void handleTogglePersonalAccess(
+                                            account,
+                                            'accepts_groups',
+                                            Boolean(value),
+                                          )
+                                        }
+                                      />
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                      <span className="text-xs text-muted-foreground">Каналы</span>
+                                      <Switch
+                                        checked={account.accepts_channels}
+                                        disabled={personalUpdatingId === account.id}
+                                        onCheckedChange={(value) =>
+                                          void handleTogglePersonalAccess(
+                                            account,
+                                            'accepts_channels',
+                                            Boolean(value),
+                                          )
+                                        }
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
+                                  <span>Telegram ID: {account.telegram_user_id ?? '—'}</span>
+                                  <ConfirmAction
+                                    title="Отключить личный аккаунт?"
+                                    description="Сессия будет отозвана, новое подключение потребует повторного сканирования QR-кода."
+                                    confirmLabel="Отключить"
+                                    onConfirm={() => handleDeletePersonalAccount(account.id)}
+                                  >
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      disabled={personalUpdatingId === account.id}
+                                    >
+                                      <Trash2 className="size-4" />
+                                    </Button>
+                                  </ConfirmAction>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </AccordionPanel>
         </AccordionItem>
 

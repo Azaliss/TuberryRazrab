@@ -47,9 +47,6 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
     // 1. Same-origin request (avoids mixed content issues and reuses proxy if configured)
     preferredTargets.push(sanitizedPath);
 
-    // 1a. Internal proxy route routed через Next (подходит, даже если внешний прокси отдает 502)
-    preferredTargets.push(`/api/backend${sanitizedPath}`);
-
     // 2. Explicit browser base if задан
     if (envBrowserBase) {
       preferredTargets.push(`${envBrowserBase}${sanitizedPath}`);
